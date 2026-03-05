@@ -1,0 +1,299 @@
+---
+title: 'DeadCodePass'
+description: 'Obfuscation pass that inserts unreachable dead-code branches to confuse analysis tools'
+---
+
+## Overview
+
+`DeadCodePass` is an obfuscation pass that inserts unreachable dead-code branches into procedure bodies to confuse static analysis and decompilers. These branches contain valid-looking code that will never execute, making it harder to understand the actual control flow.
+
+<Info>
+  The Dart VM optimizer eliminates these dead branches at runtime, so there is **no performance impact** on the final application.
+</Info>
+
+## Class Definition
+
+```dart
+class DeadCodePass extends Pass {
+  DeadCodePass({this.maxInsertionsPerProcedure = 1});
+  
+  final int maxInsertionsPerProcedure;
+
+  @override
+  String get name => 'dead_code';
+
+  @override
+  void run(Component component, PassContext context);
+}
+```
+
+Source: `lib/src/engine/passes/dead_code/dead_code_pass.dart:12`
+
+## Constructor Parameters
+
+<ParamField path="maxInsertionsPerProcedure" type="int" default="1">
+  Maximum number of dead-code branches to insert per procedure. Higher values increase obfuscation but also increase binary size.
+</ParamField>
+
+## How It Works
+
+The pass inserts `if (false) { ... }` blocks into procedure bodies. Since the condition is always `false`, these branches are never executed but appear as valid code paths to static analyzers.
+
+<CardGroup cols={2}>
+  <Card title="Insertion Strategy" icon="code-branch">
+    Dead branches are inserted before existing statements, up to `maxInsertionsPerProcedure` times per procedure
+  </Card>
+  <Card title="Runtime Optimization" icon="gauge-high">
+    The Dart VM's optimizer detects `if (false)` patterns and removes them during compilation, resulting in zero runtime overhead
+  </Card>
+</CardGroup>
+
+### Transformation Example
+
+Before:
+```dart
+void process(int value) {
+  print(value);
+  return;
+}
+```
+
+After (with `maxInsertionsPerProcedure = 2`):
+```dart
+void process(int value) {
+  if (false) {
+    // Dead code that never executes
+    var _$0 = 42;
+    _$0 = _$0 * 2;
+  }
+  print(value);
+  if (false) {
+    // Another dead branch
+    var _$1 = 'dummy';
+  }
+  return;
+}
+```
+
+## Configuration
+
+### Maximum Insertions
+
+Control how many dead branches are inserted per procedure:
+
+```dart
+// Light obfuscation (default)
+final pass = DeadCodePass(maxInsertionsPerProcedure: 1);
+
+// Medium obfuscation
+final pass = DeadCodePass(maxInsertionsPerProcedure: 3);
+
+// Heavy obfuscation
+final pass = DeadCodePass(maxInsertionsPerProcedure: 5);
+
+// Disabled
+final pass = DeadCodePass(maxInsertionsPerProcedure: 0);
+```
+
+<Warning>
+  Higher values of `maxInsertionsPerProcedure` increase the binary size proportionally. Balance obfuscation needs with size constraints.
+</Warning>
+
+## Filtering Rules
+
+The pass automatically skips:
+
+- **Dart SDK libraries** (`dart:*` procedures)
+- **External packages** (packages not matching the project package name)
+- **Empty procedure bodies** (nothing to insert before)
+- **Non-block bodies** (arrow functions, expression bodies)
+- **Libraries matching exclude patterns** (configured via `excludeLibraryUriPatterns`)
+
+## Methods
+
+### run()
+
+```dart
+void run(Component component, PassContext context)
+```
+
+Runs the dead code insertion pass over the component:
+
+1. Resolves the `int` class from `dart:core` (used for generating dummy code)
+2. Creates a `DeadCodeTransformer` with the configured parameters
+3. Transforms the component by inserting dead branches into procedures
+
+<ParamField path="component" type="Component" required>
+  The Dart kernel component to transform
+</ParamField>
+
+<ParamField path="context" type="PassContext" required>
+  Shared context containing options, symbol table, and name generator
+</ParamField>
+
+## Usage Example
+
+### Basic Usage
+
+```dart
+import 'package:kernel/kernel.dart';
+import 'package:refractor/refractor.dart';
+
+// Load a Dart kernel component
+final component = loadComponentFromBinary('app.dill');
+
+// Create context
+final context = PassContext(
+  symbolTable: SymbolTable(),
+  nameGenerator: NameGenerator(),
+  options: PassOptions(),
+);
+
+// Run the dead code pass with custom insertion count
+final deadCodePass = DeadCodePass(maxInsertionsPerProcedure: 3);
+deadCodePass.run(component, context);
+
+// Procedures now contain dead branches
+```
+
+### With PassRunner
+
+```dart
+import 'package:refractor/refractor.dart';
+
+// Create pass runner with dead code insertion
+final runner = PassRunner(
+  passes: [
+    DeadCodePass(maxInsertionsPerProcedure: 2),
+  ],
+);
+
+// Run all passes
+final (obfuscated, symbolTable) = runner.run(
+  component,
+  PassOptions(),
+);
+```
+
+### Combined Obfuscation Pipeline
+
+```dart
+import 'package:refractor/refractor.dart';
+
+// Comprehensive obfuscation with all passes
+final runner = PassRunner(
+  passes: [
+    RenamePass(),                              // Rename identifiers
+    StringEncryptPass(xorKey: 0x5A),          // Encrypt strings
+    DeadCodePass(maxInsertionsPerProcedure: 2), // Insert dead branches
+  ],
+);
+
+final (obfuscated, symbolTable) = runner.run(
+  component,
+  PassOptions(
+    preserveMain: true,
+    excludeLibraryUriPatterns: [],
+    stringExcludePatterns: [],
+  ),
+);
+```
+
+## Testing
+
+```dart
+import 'package:kernel/kernel.dart';
+import 'package:refractor/refractor.dart';
+import 'package:test/test.dart';
+
+test('single-statement block gets one dead branch prepended', () {
+  final original = ReturnStatement(IntLiteral(42));
+  final proc = Procedure(
+    Name('fn'),
+    ProcedureKind.Method,
+    FunctionNode(Block([original])),
+    fileUri: userLib.fileUri,
+  );
+  userLib.addProcedure(proc);
+
+  component = makeComponent(coreLib: coreLib, userLib: userLib);
+  final context = makePassContext();
+  DeadCodePass().run(component, context);
+
+  final body = proc.function.body! as Block;
+  // 1 dead branch + 1 original = 2
+  expect(body.statements, hasLength(2));
+  expect(body.statements[0], isA<IfStatement>());
+  expect(body.statements[1], same(original));
+});
+
+test('inserted node has BoolLiteral(false) condition', () {
+  final proc = addProcWithStatements([ReturnStatement(IntLiteral(0))]);
+
+  component = makeComponent(coreLib: coreLib, userLib: userLib);
+  final context = makePassContext();
+  DeadCodePass().run(component, context);
+
+  final body = (proc.function.body! as Block).statements;
+  final ifStmt = body.first as IfStatement;
+  expect(ifStmt.condition, isA<BoolLiteral>());
+  expect((ifStmt.condition as BoolLiteral).value, isFalse);
+});
+```
+
+Source: `test/engine/passes/dead_code_pass_test.dart:29`
+
+## Performance Impact
+
+<CardGroup cols={2}>
+  <Card title="Binary Size" icon="file-zipper">
+    Increases proportionally to `maxInsertionsPerProcedure`. Each dead branch adds a small amount to the compiled binary.
+  </Card>
+  <Card title="Runtime Performance" icon="bolt">
+    **Zero impact**. The Dart VM optimizer removes dead branches during compilation, so they never execute.
+  </Card>
+</CardGroup>
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Reverse Engineering Protection" icon="shield">
+    Makes decompiled code harder to read by adding confusing control flow paths
+  </Card>
+  <Card title="Static Analysis Confusion" icon="magnifying-glass">
+    Causes static analysis tools to report false positives or miss actual code paths
+  </Card>
+  <Card title="Code Structure Obfuscation" icon="diagram-project">
+    Obscures the actual logic flow by interleaving dead code with real code
+  </Card>
+  <Card title="Intellectual Property Protection" icon="copyright">
+    Adds an additional layer of protection for proprietary algorithms
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<Note>
+  - Start with `maxInsertionsPerProcedure = 1` and increase gradually
+  - Monitor binary size impact, especially for mobile applications
+  - Combine with `RenamePass` for maximum obfuscation effectiveness
+  - Test the obfuscated binary thoroughly to ensure no breakage
+  - Use in production builds only (keep debug builds unobfuscated)
+</Note>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="PassRunner" icon="gears" href="/api/pass-runner">
+    Orchestrates multiple passes
+  </Card>
+  <Card title="RenamePass" icon="signature" href="/api/passes/rename-pass">
+    Rename identifiers to meaningless names
+  </Card>
+  <Card title="StringEncryptPass" icon="lock" href="/api/passes/string-encrypt-pass">
+    Encrypt string literals with XOR encoding
+  </Card>
+  <Card title="RefractorEngine" icon="engine" href="/api/refractor-engine">
+    Main obfuscation engine
+  </Card>
+</CardGroup>

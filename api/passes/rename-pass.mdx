@@ -1,0 +1,169 @@
+---
+title: 'RenamePass'
+description: 'Obfuscation pass that renames user-defined identifiers to short meaningless names'
+---
+
+## Overview
+
+`RenamePass` is an obfuscation pass that renames user-defined identifiers (classes, methods, fields, variables) to short meaningless names like `_$0`, `_$1`, etc. This makes reverse engineering significantly harder by removing semantic information from the code.
+
+<Info>
+  The `RenamePass` uses a three-phase approach to safely rename all declarations and their references throughout the AST.
+</Info>
+
+## Class Definition
+
+```dart
+class RenamePass extends Pass {
+  @override
+  String get name => 'rename';
+
+  @override
+  void run(Component component, PassContext context);
+}
+```
+
+Source: `lib/src/engine/passes/rename/rename_pass.dart:16`
+
+## How It Works
+
+The `RenamePass` operates in three distinct phases:
+
+<CardGroup cols={3}>
+  <Card title="Phase 1: Collection" icon="list">
+    Collects all renameable nodes and assigns obfuscated names using `RenameVisitor`
+  </Card>
+  <Card title="Phase 2: Transformation" icon="wand-magic-sparkles">
+    Applies the renames so all declarations and references are updated using `RenameTransformer`
+  </Card>
+  <Card title="Phase 3: Unbinding" icon="link-slash">
+    Unbinds canonical names for renamed user libraries so they can be recomputed correctly by `BinaryPrinter.writeComponentFile`
+  </Card>
+</CardGroup>
+
+## Configuration Options
+
+The `RenamePass` behavior is controlled through `PassOptions`:
+
+<ParamField path="preserveMain" type="bool" default="true">
+  If `true`, the top-level `main` procedure is not renamed. This is useful for maintaining a recognizable entry point.
+</ParamField>
+
+<ParamField path="excludeLibraryUriPatterns" type="List<Glob>" default="[]">
+  URI/path glob patterns for libraries to skip entirely. Libraries matching these patterns won't be obfuscated.
+</ParamField>
+
+## Library Filtering
+
+The pass automatically skips:
+
+- **Dart SDK libraries** (`dart:*`)
+- **External packages** (packages not matching the project package name)
+- **Libraries matching exclude patterns** (configured via `excludeLibraryUriPatterns`)
+- **Nodes with `@pragma` annotations** (preserved to maintain framework compatibility)
+
+<Warning>
+  Without unbinding canonical names in Phase 3, the old canonical name entries (pre-rename) would conflict with the new names during serialization.
+</Warning>
+
+## Usage Example
+
+### Basic Usage
+
+```dart
+import 'package:kernel/kernel.dart';
+import 'package:refractor/refractor.dart';
+
+// Load a Dart kernel component
+final component = loadComponentFromBinary('app.dill');
+
+// Create context with options
+final context = PassContext(
+  symbolTable: SymbolTable(),
+  nameGenerator: NameGenerator(),
+  options: PassOptions(
+    preserveMain: true,
+    excludeLibraryUriPatterns: [],
+  ),
+);
+
+// Run the rename pass
+final renamePass = RenamePass();
+renamePass.run(component, context);
+
+// Symbol table now contains original -> obfuscated mappings
+print(context.symbolTable.obfuscated('MyClass')); // e.g., "_$0"
+```
+
+### With PassRunner
+
+```dart
+import 'package:refractor/refractor.dart';
+
+// Create pass runner with rename pass
+final runner = PassRunner(
+  passes: [RenamePass()],
+);
+
+// Run all passes
+final (obfuscated, symbolTable) = runner.run(
+  component,
+  PassOptions(preserveMain: false),
+);
+
+// All identifiers including main are now obfuscated
+```
+
+## Symbol Table Integration
+
+The `RenamePass` populates the `SymbolTable` with mappings from original names to obfuscated names. This is useful for:
+
+- **Debugging**: Understanding what original names map to
+- **Stack trace deobfuscation**: Converting obfuscated stack traces back to readable form
+- **Symbol maps**: Generating external symbol mapping files
+
+```dart
+// After running RenamePass
+final originalName = 'UserService';
+final obfuscatedName = context.symbolTable.obfuscated(originalName);
+print('$originalName -> $obfuscatedName'); // e.g., "UserService -> _$42"
+```
+
+## Testing
+
+```dart
+import 'package:kernel/kernel.dart';
+import 'package:refractor/refractor.dart';
+import 'package:test/test.dart';
+
+test('renames class name in user library', () {
+  final cls = Class(name: 'MyService', fileUri: userLib.fileUri);
+  userLib.addClass(cls);
+
+  final context = makePassContext();
+  final component = makeComponent(coreLib: coreLib, userLib: userLib);
+  RenamePass().run(component, context);
+
+  expect(cls.name, startsWith(r'_$'));
+  expect(cls.name, isNot('MyService'));
+});
+```
+
+Source: `test/engine/passes/rename_pass_test.dart:25`
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="PassRunner" icon="gears" href="/api/pass-runner">
+    Orchestrates multiple passes
+  </Card>
+  <Card title="SymbolTable" icon="table" href="/api/symbol-table">
+    Tracks original to obfuscated name mappings
+  </Card>
+  <Card title="StringEncryptPass" icon="lock" href="/api/passes/string-encrypt-pass">
+    Encrypts string literals with XOR encoding
+  </Card>
+  <Card title="DeadCodePass" icon="code-branch" href="/api/passes/dead-code-pass">
+    Injects unreachable dead code branches
+  </Card>
+</CardGroup>

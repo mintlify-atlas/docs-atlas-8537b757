@@ -1,0 +1,151 @@
+---
+title: 'refractor build'
+description: 'Compile, obfuscate, and build to a target format.'
+---
+
+The `build` command runs the full Refractor pipeline: compiles your Dart source to kernel bytecode, applies obfuscation passes defined in `refractor.yaml`, and outputs the result in your chosen format.
+
+## Usage
+
+```bash
+refractor build [options]
+```
+
+## Options
+
+<ParamField path="--input" type="string" default="lib/main.dart">
+  Input Dart file or directory to compile. Specify the entrypoint of your application.
+  
+  Short flag: `-i`
+</ParamField>
+
+<ParamField path="--output" type="string" default="build">
+  Output directory path. The final artifact will be written as `build/out.<extension>` where the extension depends on the target type.
+  
+  Short flag: `-o`
+</ParamField>
+
+<ParamField path="--target" type="string" default="exe">
+  Target format to build for. Determines the output file type and compilation strategy.
+  
+  Short flag: `-t`
+  
+  Allowed values:
+  - `exe` - Standalone executable (no extension)
+  - `aot` - AOT snapshot (`.aot` extension)
+  - `jit` - JIT snapshot (`.jit` extension)
+  - `kernel` - Kernel bytecode only (`.dill` extension)
+</ParamField>
+
+## Build Pipeline
+
+The build command executes these steps:
+
+<Steps>
+  <Step title="Load Configuration">
+    Reads `refractor.yaml` from the current directory. The build will fail if this file is missing or malformed.
+  </Step>
+  
+  <Step title="Compile to Kernel">
+    Compiles the input Dart file to kernel bytecode (`.dill` format) using `dart compile kernel`.
+  </Step>
+  
+  <Step title="Apply Obfuscation Passes">
+    Processes the kernel bytecode with each enabled pass:
+    - **Rename** - Rewrites identifiers to short meaningless names
+    - **String Encryption** - XOR-encodes string literals with runtime decoder
+    - **Dead Code Injection** - Inserts unreachable branches
+  </Step>
+  
+  <Step title="Compile to Target">
+    Compiles the obfuscated kernel to the specified target format using `dart compile <target>`.
+  </Step>
+  
+  <Step title="Write Symbol Map">
+    Generates a JSON file mapping obfuscated names back to their originals. The output path is configured via `refractor.symbol_map` in your config file.
+  </Step>
+</Steps>
+
+## Examples
+
+### Build Executable (Default)
+
+Compile to a standalone executable:
+
+```bash
+refractor build
+```
+
+Outputs: `build/out` (executable file)
+
+### Build Kernel Only
+
+Compile to obfuscated kernel bytecode without final compilation:
+
+```bash
+refractor build --target kernel
+```
+
+Outputs: `build/out.dill`
+
+<Tip>
+  Use the `kernel` target when you want to inspect the obfuscated bytecode with `refractor inspect` or integrate with custom build pipelines.
+</Tip>
+
+### Build AOT Snapshot
+
+Generate an ahead-of-time compiled snapshot:
+
+```bash
+refractor build --target aot --output dist
+```
+
+Outputs: `dist/out.aot`
+
+### Custom Input File
+
+Build from a different entrypoint:
+
+```bash
+refractor build --input bin/server.dart --output build/server
+```
+
+Outputs: `build/server/out`
+
+### Build JIT Snapshot
+
+Create a just-in-time compiled snapshot:
+
+```bash
+refractor build --target jit
+```
+
+Outputs: `build/out.jit`
+
+## Output
+
+On success, the command prints:
+
+```
+✓ Build complete: build/out.exe
+```
+
+The build process also:
+- Creates the output directory if it doesn't exist
+- Writes the symbol map to the path specified in `refractor.yaml`
+- Returns exit code `0` on success
+
+<Warning>
+  The build command requires a valid `refractor.yaml` configuration file in the current directory. Run `refractor init` first if you don't have one.
+</Warning>
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="refractor init" icon="file" href="./init">
+    Generate a starter configuration file
+  </Card>
+  <Card title="refractor inspect" icon="magnifying-glass" href="./inspect">
+    Inspect the contents of a .dill file
+  </Card>
+</CardGroup>

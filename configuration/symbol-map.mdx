@@ -1,0 +1,370 @@
+---
+title: "Symbol Map"
+description: "Understanding the obfuscated-to-original name mapping file"
+---
+
+The **symbol map** is a JSON file that records the mapping from obfuscated identifiers back to their original names. It's essential for debugging obfuscated code and deobfuscating stack traces.
+
+## Overview
+
+When Refractor obfuscates your code, it renames classes, methods, and fields to short, meaningless identifiers. The symbol map preserves the original names so you can:
+
+- **Deobfuscate stack traces** from production builds
+- **Debug obfuscated binaries** by translating error messages
+- **Understand crash reports** with obfuscated symbols
+
+<Warning>
+**Keep your symbol map secure!** It contains the complete mapping to reverse obfuscation. Never commit it to public repositories or ship it with your application.
+</Warning>
+
+## Configuration
+
+Specify the output path in `refractor.yaml`:
+
+```yaml
+refractor:
+  symbol_map: build/refractor_map.json
+```
+
+**Default:** `symbol_map.json` (current directory)
+
+<Tip>
+Store symbol maps in `build/` or `.gitignore` them to prevent accidental commits.
+</Tip>
+
+## File Format
+
+The symbol map is a JSON object with obfuscated names as keys and original names as values.
+
+### Structure
+
+```json
+{
+  "a": "UserService",
+  "b": "getUserName",
+  "c": "validateEmail",
+  "d": "AuthProvider",
+  "e": "login",
+  "f": "logout",
+  "aa": "DatabaseHelper",
+  "ab": "saveUser"
+}
+```
+
+**Format:**
+- **Pretty-printed** with 2-space indentation
+- **UTF-8 encoded**
+- **Key:** Obfuscated identifier (short name)
+- **Value:** Original identifier (full name)
+
+### Example Output
+
+For a simple Dart application:
+
+```dart
+// Original code
+class PaymentService {
+  String processPayment(double amount) {
+    return 'Processed: \$${amount}';
+  }
+}
+
+class Logger {
+  void log(String message) {
+    print(message);
+  }
+}
+```
+
+Refractor generates:
+
+```json
+{
+  "a": "PaymentService",
+  "b": "processPayment",
+  "c": "amount",
+  "d": "Logger",
+  "e": "log",
+  "f": "message"
+}
+```
+
+## What Gets Mapped?
+
+The symbol map includes:
+
+<CardGroup cols={2}>
+  <Card title="Classes" icon="cube">
+    All project class names renamed by the `rename` pass
+  </Card>
+  <Card title="Methods" icon="function">
+    Instance methods, static methods, and functions
+  </Card>
+  <Card title="Fields" icon="table-cells">
+    Instance fields, static fields, and top-level variables
+  </Card>
+  <Card title="Properties" icon="gear">
+    Getters and setters (if renamed)
+  </Card>
+</CardGroup>
+
+<Info>
+The symbol map only includes **renamed symbols**. If `preserve_main: true`, the `main()` function won't appear in the map.
+</Info>
+
+## Using the Symbol Map
+
+### Deobfuscating Stack Traces
+
+When your obfuscated app crashes, stack traces contain obfuscated names:
+
+```
+Unhandled exception:
+Exception: Payment failed
+#0      a.b (package:myapp/a.dart:42:7)
+#1      d.e (package:myapp/d.dart:15:12)
+```
+
+Use the symbol map to translate:
+
+1. Load `refractor_map.json`
+2. Look up `a` → `PaymentService`
+3. Look up `b` → `processPayment`
+4. Look up `d` → `Logger`
+5. Look up `e` → `log`
+
+**Deobfuscated:**
+
+```
+Unhandled exception:
+Exception: Payment failed
+#0      PaymentService.processPayment (package:myapp/payment_service.dart:42:7)
+#1      Logger.log (package:myapp/logger.dart:15:12)
+```
+
+### Manual Lookup
+
+You can parse the JSON in any language:
+
+<CodeGroup>
+
+```dart Dart
+import 'dart:convert';
+import 'dart:io';
+
+void main() {
+  final json = File('symbol_map.json').readAsStringSync();
+  final map = jsonDecode(json) as Map<String, dynamic>;
+  
+  final obfuscated = 'a';
+  final original = map[obfuscated];
+  print('$obfuscated -> $original'); // a -> PaymentService
+}
+```
+
+```python Python
+import json
+
+with open('symbol_map.json') as f:
+    symbol_map = json.load(f)
+
+obfuscated = 'a'
+original = symbol_map.get(obfuscated)
+print(f'{obfuscated} -> {original}')  # a -> PaymentService
+```
+
+```javascript JavaScript
+const fs = require('fs');
+
+const symbolMap = JSON.parse(fs.readFileSync('symbol_map.json', 'utf8'));
+
+const obfuscated = 'a';
+const original = symbolMap[obfuscated];
+console.log(`${obfuscated} -> ${original}`); // a -> PaymentService
+```
+
+</CodeGroup>
+
+### Reverse Lookup
+
+To find the obfuscated name for an original identifier:
+
+```dart
+String? findObfuscated(Map<String, String> map, String original) {
+  for (final entry in map.entries) {
+    if (entry.value == original) return entry.key;
+  }
+  return null;
+}
+
+final obfuscated = findObfuscated(symbolMap, 'PaymentService');
+print(obfuscated); // 'a'
+```
+
+## File Location
+
+The symbol map is written to the path specified in your configuration:
+
+```yaml
+refractor:
+  symbol_map: build/refractor_map.json
+```
+
+**Behavior:**
+- Parent directories are created automatically if they don't exist
+- Existing files are overwritten
+- Relative paths are resolved from the working directory
+
+### Recommended Locations
+
+<Steps>
+  <Step title="Build directory">
+    Store alongside compiled output:
+    
+    ```yaml
+    symbol_map: build/refractor_map.json
+    ```
+    
+    ✅ Keeps maps with their corresponding builds  
+    ✅ Easy to clean with `rm -rf build/`
+  </Step>
+  
+  <Step title="Version-specific path">
+    Include version numbers for multiple releases:
+    
+    ```yaml
+    symbol_map: symbols/v1.2.3/refractor_map.json
+    ```
+    
+    ✅ Track maps across versions  
+    ✅ Deobfuscate old crash reports
+  </Step>
+  
+  <Step title="Secure storage">
+    Store outside the project directory:
+    
+    ```yaml
+    symbol_map: /secure/symbols/myapp_map.json
+    ```
+    
+    ✅ Prevent accidental exposure  
+    ✅ Centralized symbol storage
+  </Step>
+</Steps>
+
+## Security Best Practices
+
+<Warning>
+Treat symbol maps like **production secrets**. They completely reverse your obfuscation.
+</Warning>
+
+### Do:
+
+- ✅ Add `symbol_map.json` to `.gitignore`
+- ✅ Store maps in secure, access-controlled locations
+- ✅ Use version-specific filenames (`map_v1.2.3.json`)
+- ✅ Encrypt symbol maps at rest
+- ✅ Include maps in secure backup systems
+
+### Don't:
+
+- ❌ Commit symbol maps to version control
+- ❌ Include maps in app bundles or containers
+- ❌ Store maps in public cloud storage
+- ❌ Share maps in public issue trackers
+- ❌ Embed map contents in source code
+
+## When Symbol Maps Are Generated
+
+Refractor writes the symbol map during the `refractor build` command:
+
+```bash
+refractor build
+```
+
+The map is written **after** all obfuscation passes complete, ensuring it reflects the final state.
+
+### Build Output
+
+```bash
+$ refractor build
+✓ Compiled lib/main.dart
+✓ Applied rename pass (142 symbols)
+✓ Applied string_encrypt pass
+✓ Wrote symbol map to symbol_map.json
+✓ Built build/out.exe
+```
+
+## Implementation Details
+
+The symbol map is generated by the `SymbolTable` class:
+
+<Accordion title="Source: lib/src/engine/symbol_table.dart">
+  ```dart
+  class SymbolTable {
+    // obfuscated -> original
+    final Map<String, String> _map = {};
+
+    /// Record a rename: [original] was renamed to [obfuscated].
+    void record(String original, String obfuscated) {
+      _map[obfuscated] = original;
+    }
+
+    /// Look up the original name for an [obfuscated] name.
+    String? original(String obfuscated) => _map[obfuscated];
+
+    void writeToFile(String path) {
+      final file = File(path);
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(toJsonString());
+    }
+
+    /// Export as a JSON-encodable map (obfuscated -> original).
+    Map<String, String> toJson() => Map.unmodifiable(_map);
+
+    /// Export as a pretty-printed JSON string.
+    String toJsonString() => const JsonEncoder.withIndent('  ').convert(_map);
+  }
+  ```
+  
+  Source: `/home/daytona/workspace/source/lib/src/engine/symbol_table.dart:1`
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="Symbol map is empty">
+  **Cause:** No symbols were renamed (rename pass disabled or no project libraries).
+  
+  **Fix:** Enable the `rename` pass:
+  
+  ```yaml
+  passes:
+    rename: true
+  ```
+</Accordion>
+
+<Accordion title="Symbol map not created">
+  **Cause:** Output directory doesn't exist or insufficient permissions.
+  
+  **Fix:** Ensure parent directories exist and are writable. Refractor creates them automatically, but check file permissions.
+</Accordion>
+
+<Accordion title="Can't find original name">
+  **Cause:** The identifier wasn't renamed (preserved, external, or excluded).
+  
+  **Fix:** Check if the symbol is from:
+  - External packages (never renamed)
+  - Excluded files (`refractor.exclude`)
+  - Preserved functions (`preserve_main: true`)
+</Accordion>
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="refractor.yaml" icon="file-code" href="/configuration/refractor-yaml">
+    Configure symbol map path and passes
+  </Card>
+  <Card title="Rename Pass" icon="signature" href="/passes/rename">
+    Learn how symbol renaming works
+  </Card>
+</CardGroup>

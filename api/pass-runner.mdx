@@ -1,0 +1,237 @@
+---
+title: PassRunner
+description: Orchestrates obfuscation passes over kernel components
+---
+
+## Overview
+
+The `PassRunner` class runs a list of obfuscation passes over a Dart kernel `Component`. It creates a shared `PassContext` that all passes can access to coordinate symbol table updates, name generation, and configuration options.
+
+## Constructor
+
+```dart
+PassRunner({
+  required List<Pass> passes,
+  Logger? logger,
+})
+```
+
+<ParamField path="passes" type="List<Pass>" required>
+  Ordered list of obfuscation passes to run. Passes execute sequentially in the order provided.
+</ParamField>
+
+<ParamField path="logger" type="Logger?">
+  Optional Mason logger for logging pass execution progress
+</ParamField>
+
+## Methods
+
+### run()
+
+Runs all passes on the given component and returns the modified component along with the symbol table.
+
+```dart
+(Component, SymbolTable) run(
+  Component component,
+  PassOptions options,
+)
+```
+
+<ParamField path="component" type="Component" required>
+  The kernel `Component` to obfuscate. This is mutated in-place by the passes.
+</ParamField>
+
+<ParamField path="options" type="PassOptions" required>
+  Configuration options for all passes, including exclude patterns and feature flags
+</ParamField>
+
+<ResponseField name="(Component, SymbolTable)" type="Record">
+  Returns a tuple containing:
+  - The modified kernel `Component` (same instance, mutated in-place)
+  - The `SymbolTable` with all recorded identifier mappings
+</ResponseField>
+
+## Supporting Classes
+
+### PassContext
+
+Shared mutable context passed to every obfuscation pass.
+
+```dart
+class PassContext {
+  PassContext({
+    required SymbolTable symbolTable,
+    required NameGenerator nameGenerator,
+    required PassOptions options,
+  });
+  
+  final SymbolTable symbolTable;
+  final NameGenerator nameGenerator;
+  final PassOptions options;
+  
+  bool shouldObfuscateLibrary(Library library);
+}
+```
+
+<ParamField path="symbolTable" type="SymbolTable" required>
+  Shared symbol table for recording identifier mappings
+</ParamField>
+
+<ParamField path="nameGenerator" type="NameGenerator" required>
+  Shared name generator for producing obfuscated identifiers
+</ParamField>
+
+<ParamField path="options" type="PassOptions" required>
+  Configuration options including exclusion patterns and feature flags
+</ParamField>
+
+#### shouldObfuscateLibrary()
+
+Determines if a library should be obfuscated based on its import URI.
+
+```dart
+bool shouldObfuscateLibrary(Library library)
+```
+
+Returns `false` for:
+- SDK libraries (`dart:*`)
+- Libraries matching `excludeLibraryUriPatterns`
+- Third-party packages (only project package is obfuscated)
+
+### PassOptions
+
+Configuration options for the obfuscation engine.
+
+```dart
+class PassOptions {
+  const PassOptions({
+    List<Glob> excludeLibraryUriPatterns = const [],
+    bool preserveMain = true,
+    List<RegExp> stringExcludePatterns = const [],
+    bool verbose = false,
+  });
+}
+```
+
+<ParamField path="excludeLibraryUriPatterns" type="List<Glob>" default="[]">
+  URI/path glob patterns for libraries to skip entirely
+</ParamField>
+
+<ParamField path="preserveMain" type="bool" default="true">
+  If true, the top-level `main` procedure is not renamed
+</ParamField>
+
+<ParamField path="stringExcludePatterns" type="List<RegExp>" default="[]">
+  Regex patterns for string literals that should not be encrypted
+</ParamField>
+
+<ParamField path="verbose" type="bool" default="false">
+  If true, enable verbose logging
+</ParamField>
+
+### Pass
+
+Base class for all obfuscation passes.
+
+```dart
+abstract class Pass {
+  String get name;
+  void run(Component component, PassContext context);
+}
+```
+
+<ParamField path="name" type="String" required>
+  Human-readable name used in logging and CLI `--passes` flag
+</ParamField>
+
+Passes must implement `run()` to mutate the component in-place using the shared context.
+
+## Usage Example
+
+```dart
+import 'package:kernel/kernel.dart';
+import 'package:refractor/refractor.dart';
+
+void main() {
+  // Load kernel component
+  final component = loadComponentFromBinary('app.dill');
+  
+  // Create passes
+  final passes = [
+    RenamePass(),
+    StringEncryptPass(),
+    DeadCodePass(),
+  ];
+  
+  // Create runner
+  final runner = PassRunner(
+    passes: passes,
+    logger: Logger(),
+  );
+  
+  // Run obfuscation
+  final (obfuscated, symbolTable) = runner.run(
+    component,
+    PassOptions(
+      excludeLibraryUriPatterns: [Glob('package:flutter/**')],
+      preserveMain: true,
+    ),
+  );
+  
+  // Use results
+  writeComponentToBinary(obfuscated, 'app.obfuscated.dill');
+  symbolTable.writeToFile('symbols.json');
+  
+  print('Obfuscation complete!');
+  print('Mapped ${symbolTable.size} symbols');
+}
+```
+
+<Info>
+  Passes are executed sequentially in the order provided. Each pass sees the modifications made by previous passes.
+</Info>
+
+<Note>
+  The `PassContext` provides a `shouldObfuscateLibrary()` helper that automatically excludes SDK libraries, third-party packages, and libraries matching your exclude patterns.
+</Note>
+
+## Creating Custom Passes
+
+Extend the `Pass` base class to create your own obfuscation transformation:
+
+```dart
+class MyCustomPass extends Pass {
+  @override
+  String get name => 'my-custom-pass';
+  
+  @override
+  void run(Component component, PassContext context) {
+    for (final library in component.libraries) {
+      if (!context.shouldObfuscateLibrary(library)) continue;
+      
+      // Transform the library
+      for (final class_ in library.classes) {
+        // Your transformation logic here
+        final newName = context.nameGenerator.next();
+        context.symbolTable.record(class_.name, newName);
+        class_.name = newName;
+      }
+    }
+  }
+}
+```
+
+<Warning>
+  Always check `shouldObfuscateLibrary()` before modifying a library to avoid breaking SDK or third-party code.
+</Warning>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="RefractorEngine" icon="engine" href="/api/refractor-engine">
+    High-level engine that uses PassRunner internally
+  </Card>
+  <Card title="SymbolTable" icon="table" href="/api/symbol-table">
+    Tracks identifier mappings produced by passes
+  </Card>
+</CardGroup>

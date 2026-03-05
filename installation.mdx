@@ -1,0 +1,170 @@
+---
+title: "Installation"
+description: "Install Refractor and verify your setup"
+---
+
+## Prerequisites
+
+Refractor requires the Dart SDK version **3.10.0** or later.
+
+<Steps>
+  <Step title="Check your Dart version">
+    Verify that you have Dart installed:
+
+    ```bash
+    dart --version
+    ```
+
+    You should see output like:
+
+    ```
+    Dart SDK version: 3.10.0 (stable)
+    ```
+
+    <Note>
+      If you don't have Dart installed or need to upgrade, visit the [official Dart installation guide](https://dart.dev/get-dart).
+    </Note>
+  </Step>
+
+  <Step title="Install Refractor globally">
+    Install Refractor from the GitHub repository:
+
+    ```bash
+    dart pub global activate --source git https://github.com/yardexx/refractor.git
+    ```
+
+    This installs the `refractor` command globally on your system.
+
+    <Info>
+      The installation may take a few minutes as it compiles the tool and its dependencies.
+    </Info>
+  </Step>
+
+  <Step title="Verify the installation">
+    Confirm that Refractor is installed correctly:
+
+    ```bash
+    refractor --help
+    ```
+
+    You should see the help output:
+
+    ```
+    Dart kernel (.dill) obfuscation tool — rename, encrypt, and obfuscate.
+
+    Usage: refractor <command> [arguments]
+
+    Global options:
+    -h, --help    Print this usage information.
+
+    Available commands:
+      build      Compile, obfuscate, and build to a target format.
+      completion Generate completion script for bash or zsh.
+      init       Create a refractor.yaml config template.
+      inspect    Print a tree representation of a .dill file.
+    ```
+  </Step>
+</Steps>
+
+## Shell Completion (Optional)
+
+Refractor supports shell completion for bash and zsh. To enable it:
+
+<CodeGroup>
+
+```bash Bash
+# Generate completion script
+refractor completion bash > ~/.refractor-completion.bash
+
+# Add to your ~/.bashrc or ~/.bash_profile
+echo 'source ~/.refractor-completion.bash' >> ~/.bashrc
+source ~/.bashrc
+```
+
+```bash Zsh
+# Generate completion script
+refractor completion zsh > ~/.refractor-completion.zsh
+
+# Add to your ~/.zshrc
+echo 'source ~/.refractor-completion.zsh' >> ~/.zshrc
+source ~/.zshrc
+```
+
+</CodeGroup>
+
+<Tip>
+  After enabling completion, you can use `Tab` to autocomplete commands and options.
+</Tip>
+
+## Updating Refractor
+
+To update Refractor to the latest version:
+
+```bash
+dart pub global activate --source git https://github.com/yardexx/refractor.git
+```
+
+This command reinstalls Refractor from the repository, pulling the latest changes.
+
+## Uninstalling Refractor
+
+To remove Refractor from your system:
+
+```bash
+dart pub global deactivate refractor
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Command not found: refractor">
+    If you get a "command not found" error, ensure that Dart's global bin directory is in your PATH:
+
+    ```bash
+    # Add to ~/.bashrc, ~/.zshrc, or equivalent
+    export PATH="$PATH:$HOME/.pub-cache/bin"
+    ```
+
+    Then restart your terminal or run `source ~/.bashrc` (or `~/.zshrc`).
+  </Accordion>
+
+  <Accordion title="Dart SDK version error">
+    If you see an error about SDK constraints:
+
+    ```
+    The current Dart SDK version is X.Y.Z.
+    Because refractor requires SDK version ^3.10.0, version solving failed.
+    ```
+
+    Update your Dart SDK to version 3.10.0 or later.
+  </Accordion>
+
+  <Accordion title="Installation takes too long">
+    The initial installation compiles Refractor from source, which includes:
+    - Dart kernel manipulation libraries
+    - CLI dependencies
+    - Code generation for configuration
+
+    This is normal and only happens during installation. Subsequent runs will be fast.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get started with your first obfuscated build
+  </Card>
+
+  <Card title="Commands" icon="terminal" href="/commands/build">
+    Explore all available commands and options
+  </Card>
+
+  <Card title="Configuration" icon="gear" href="/configuration/refractor-yaml">
+    Learn how to configure obfuscation passes
+  </Card>
+
+  <Card title="Obfuscation Passes" icon="shield" href="/obfuscation/overview">
+    Understand rename, string encryption, and dead code injection
+  </Card>
+</CardGroup>

@@ -1,0 +1,233 @@
+---
+title: 'refractor init'
+description: 'Create a refractor.yaml config template.'
+---
+
+The `init` command scaffolds a `refractor.yaml` configuration file with sensible defaults and inline documentation. This file is required for all Refractor operations.
+
+## Usage
+
+```bash
+refractor init [options]
+```
+
+## Options
+
+<ParamField path="--output" type="string" default="refractor.yaml">
+  Output path for the config file. By default, creates `refractor.yaml` in the current directory.
+  
+  Short flag: `-o`
+</ParamField>
+
+## Behavior
+
+<Steps>
+  <Step title="Check for Existing File">
+    If a file already exists at the output path, Refractor will prompt you to confirm whether to overwrite it.
+  </Step>
+  
+  <Step title="Write Template">
+    Creates the configuration file with a complete template including all available passes and their options.
+  </Step>
+  
+  <Step title="Confirmation">
+    Prints a success message with the file path.
+  </Step>
+</Steps>
+
+## Generated Template
+
+The `init` command creates a fully-commented configuration template:
+
+```yaml
+# Refractor configuration
+# Modeled after analysis_options.yaml for Dart developer familiarity.
+# See: https://github.com/yardexx/refractor
+
+# Global tool settings.
+refractor:
+  # Output path for the symbol map (original → obfuscated name mapping).
+  # symbol_map: build/refractor_map.json
+
+  # Scope is fixed to the current project (pubspec package + current folder).
+
+  # Library URI/path exclusions using glob patterns.
+  # exclude:
+  #   - "**/*.g.dart"
+  #   - "**/*.freezed.dart"
+
+# Pass configuration — enable/disable and configure each pass.
+# Use `true` for defaults, `false` to disable, or a map for custom settings.
+passes:
+  rename:
+    # preserve_main: true
+
+  string_encrypt: true
+  # string_encrypt:
+  #   xor_key: 0x5A
+  #   exclude_patterns:
+  #     - "^https://"
+
+  dead_code: false
+
+# Verbose logging.
+# verbose: false
+```
+
+## Configuration Sections
+
+### Global Settings (`refractor`)
+
+<ParamField path="symbol_map" type="string" default="build/refractor_map.json">
+  Path where the symbol mapping file will be written. This JSON file maps obfuscated names back to their originals for debugging.
+</ParamField>
+
+<ParamField path="exclude" type="array">
+  Glob patterns to exclude libraries from obfuscation. Useful for generated files like `*.g.dart` or `*.freezed.dart`.
+  
+  Example:
+  ```yaml
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+  ```
+</ParamField>
+
+<ParamField path="verbose" type="boolean" default="false">
+  Enable detailed logging during the build process.
+</ParamField>
+
+<Note>
+  The obfuscation scope is always the current project: libraries matching the `name` in `pubspec.yaml` and files under the working directory.
+</Note>
+
+### Pass Configuration (`passes`)
+
+Each pass can be configured in three ways:
+- `true` - Enable with default settings
+- `false` - Disable the pass
+- `map` - Enable with custom options
+
+#### Rename Pass
+
+Rewrites class, method, and field identifiers to short meaningless names.
+
+```yaml
+rename:
+  preserve_main: true
+```
+
+<ParamField path="preserve_main" type="boolean" default="true">
+  Keep the `main()` function name unchanged. Recommended for executables.
+</ParamField>
+
+#### String Encryption Pass
+
+Replaces string literals with XOR-encoded byte arrays and injects a runtime decoder.
+
+```yaml
+string_encrypt:
+  xor_key: 0x5A
+  exclude_patterns:
+    - "^https://"
+```
+
+<ParamField path="xor_key" type="integer" default="0x5A">
+  Byte value used for XOR encryption. Valid range: `0x00` to `0xFF`.
+</ParamField>
+
+<ParamField path="exclude_patterns" type="array">
+  Regex patterns for strings that should not be encrypted. Useful for preserving URLs, package names, or other runtime-critical strings.
+</ParamField>
+
+#### Dead Code Pass
+
+Inserts unreachable branches to hinder static analysis and decompilers.
+
+```yaml
+dead_code:
+  max_insertions_per_procedure: 2
+```
+
+<ParamField path="max_insertions_per_procedure" type="integer" default="2">
+  Maximum number of dead code branches to insert per function.
+</ParamField>
+
+<Warning>
+  Dead code injection is disabled by default (`dead_code: false`). Enable it only if you need additional protection against decompilation, as it increases binary size.
+</Warning>
+
+## Examples
+
+### Create Default Config
+
+```bash
+refractor init
+```
+
+Creates `refractor.yaml` in the current directory.
+
+### Custom Output Path
+
+```bash
+refractor init --output config/refractor.yaml
+```
+
+Creates the config file in a `config/` subdirectory.
+
+### Monorepo Setup
+
+```bash
+cd packages/mobile
+refractor init
+```
+
+Each package in a monorepo can have its own `refractor.yaml` configuration.
+
+## Output
+
+On success:
+
+```
+✓ Created refractor.yaml
+```
+
+If the file already exists, you'll see:
+
+```
+⚠ refractor.yaml already exists. Overwrite?
+› Overwrite? (Y/n)
+```
+
+<Info>
+  After creating your config file, customize the pass settings based on your project's needs. Not all passes are suitable for every application.
+</Info>
+
+## Next Steps
+
+After initializing your configuration:
+
+<Steps>
+  <Step title="Review Pass Settings">
+    Uncomment and customize the passes you want to enable. Start with just `rename` and `string_encrypt` for most projects.
+  </Step>
+  
+  <Step title="Configure Exclusions">
+    Add glob patterns to exclude generated files or third-party code that shouldn't be obfuscated.
+  </Step>
+  
+  <Step title="Run Build">
+    Test your configuration with `refractor build` to ensure it works with your project.
+  </Step>
+</Steps>
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="refractor build" icon="hammer" href="./build">
+    Compile and obfuscate your application
+  </Card>
+  <Card title="Configuration Guide" icon="gear" href="../essentials/configuration">
+    Detailed configuration reference
+  </Card>
+</CardGroup>

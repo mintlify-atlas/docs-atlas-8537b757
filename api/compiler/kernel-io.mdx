@@ -1,0 +1,179 @@
+---
+title: KernelIO
+description: Abstract interface for loading and writing Dart kernel components
+---
+
+## Overview
+
+The `KernelIO` interface provides an abstraction for loading and writing Dart kernel `Component` objects from and to `.dill` files.
+
+<Info>
+The `KernelIO` interface is defined in the pure engine layer without `dart:io` dependencies, allowing `RefractorEngine` to use it without platform constraints.
+</Info>
+
+## KernelIO Interface
+
+```dart
+abstract class KernelIO {
+  Component load(String path);
+  void write(Component component, String path);
+}
+```
+
+### load()
+
+Load a kernel `Component` from a `.dill` file at the specified path.
+
+<ParamField path="path" type="String" required>
+  Path to the `.dill` file to load
+</ParamField>
+
+<ResponseField name="return" type="Component">
+  A kernel `Component` object from the `package:kernel/kernel.dart` library
+</ResponseField>
+
+<Warning>
+If the file does not exist, implementations should throw an exception.
+</Warning>
+
+### write()
+
+Write a kernel `Component` to a `.dill` file at the specified path.
+
+<ParamField path="component" type="Component" required>
+  The kernel `Component` to serialize and write
+</ParamField>
+
+<ParamField path="path" type="String" required>
+  Path where the `.dill` file will be written
+</ParamField>
+
+<Note>
+The parent directory will be created automatically if it doesn't exist.
+</Note>
+
+## FileKernelIO Implementation
+
+`FileKernelIO` is the concrete file-based implementation of `KernelIO`.
+
+```dart
+class FileKernelIO implements KernelIO {
+  @override
+  Component load(String path);
+
+  @override
+  void write(Component component, String path);
+}
+```
+
+### Implementation Details
+
+- **load()**: Uses `loadComponentFromBinary()` from `package:kernel/kernel.dart`
+- **write()**: Uses `BinaryPrinter` from `package:kernel/binary/ast_to_binary.dart` to serialize the component
+- Creates parent directories recursively when writing
+- Throws `FileIoException` if the input file doesn't exist during load
+
+## Component Class
+
+The `Component` class is from the Dart kernel package (`package:kernel/kernel.dart`). It represents the entire program as an abstract syntax tree (AST).
+
+<Info>
+A `Component` contains libraries, classes, procedures, and all other program elements in their kernel representation.
+</Info>
+
+## Usage Example
+
+```dart
+import 'package:kernel/kernel.dart';
+import 'package:refractor/refractor.dart';
+import 'package:refractor/src/engine/kernel/file_kernel_io.dart';
+
+void main() {
+  final kernelIO = FileKernelIO();
+
+  // Load a kernel component from disk
+  final component = kernelIO.load('build/app.dill');
+
+  print('Loaded ${component.libraries.length} libraries');
+
+  // Modify the component (e.g., with obfuscation passes)
+  // ...
+
+  // Write the modified component back to disk
+  kernelIO.write(component, 'build/app.obfuscated.dill');
+}
+```
+
+## Integration with RefractorEngine
+
+`KernelIO` is used by `RefractorEngine` to load and save kernel components during the obfuscation pipeline:
+
+```dart
+import 'package:refractor/refractor.dart';
+import 'package:refractor/src/engine/kernel/file_kernel_io.dart';
+
+void main() {
+  final kernelIO = FileKernelIO();
+  final engine = RefractorEngine(kernelIO: kernelIO);
+
+  // Load kernel
+  final component = kernelIO.load('input.dill');
+
+  // Apply obfuscation passes
+  engine.run(component, options: PassOptions());
+
+  // Save obfuscated kernel
+  kernelIO.write(component, 'output.dill');
+}
+```
+
+## Binary Format
+
+The `.dill` format is a binary serialization of the Dart kernel AST:
+
+<CardGroup cols={2}>
+  <Card title="Compact" icon="compress">
+    Efficient binary representation of the AST
+  </Card>
+  <Card title="Portable" icon="globe">
+    Platform-independent bytecode format
+  </Card>
+  <Card title="Fast Loading" icon="bolt">
+    Faster than parsing Dart source code
+  </Card>
+  <Card title="Complete" icon="check">
+    Contains all program information
+  </Card>
+</CardGroup>
+
+## Error Handling
+
+<Warning>
+`FileKernelIO.load()` will throw a `FileIoException` if the input file does not exist.
+</Warning>
+
+```dart
+import 'package:refractor/src/engine/kernel/file_kernel_io.dart';
+import 'package:refractor/src/exceptions/refractor_exception.dart';
+
+try {
+  final kernelIO = FileKernelIO();
+  final component = kernelIO.load('missing.dill');
+} on FileIoException catch (e) {
+  print('Error loading kernel: $e');
+}
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Compiler" icon="gear" href="/api/compiler/compiler">
+    Compile Dart source to kernel format
+  </Card>
+  <Card title="RefractorEngine" icon="engine" href="/api/refractor-engine">
+    Main obfuscation engine
+  </Card>
+  <Card title="PassRunner" icon="gears" href="/api/pass-runner">
+    Execute obfuscation passes on components
+  </Card>
+</CardGroup>

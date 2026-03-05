@@ -1,0 +1,545 @@
+---
+title: "String Encryption"
+description: "Replace string literals with XOR-encrypted byte arrays decoded at runtime"
+---
+
+## Overview
+
+The **String Encryption Pass** replaces plaintext `StringLiteral` nodes in your kernel AST with calls to an injected runtime decoder. Strings are encoded as XOR-encrypted byte arrays, making them invisible in the compiled binary.
+
+<Info>
+This pass runs after Rename, so the decoder function itself gets an obfuscated name like `_$0` if Rename is enabled.
+</Info>
+
+## How It Works
+
+The pass operates in two phases (lib/src/engine/passes/string_encrypt/string_encrypt_pass.dart:14):
+
+<Steps>
+  <Step title="Inject Decoder Function">
+    The pass injects a helper function `_obfDecode$` into the first user library in scope. This function takes an encrypted byte array and XOR key, then returns the decoded string.
+  </Step>
+  
+  <Step title="Transform String Literals">
+    Walk the kernel AST and replace each `StringLiteral("hello")` with `_obfDecode$([encrypted bytes], xorKey)`.
+  </Step>
+</Steps>
+
+### Encoding Algorithm
+
+Strings are encoded using simple **XOR encryption** (lib/src/engine/passes/string_encrypt/string_encrypt_pass.dart:178):
+
+```dart
+List<int> encode(String s) {
+  return utf8.encode(s).map((b) => b ^ xorKey).toList();
+}
+```
+
+**Example**: `"Hello"` with `xor_key: 0x5A`
+
+1. UTF-8 encode: `[72, 101, 108, 108, 111]`
+2. XOR each byte: `[72^90, 101^90, 108^90, 108^90, 111^90]`
+3. Result: `[18, 59, 54, 54, 53]`
+
+<Note>
+XOR is fast and reversible (`x ^ key ^ key = x`), making it ideal for runtime decoding.
+</Note>
+
+## Configuration
+
+### Enable with Defaults
+
+```yaml
+passes:
+  string_encrypt: true  # Uses xor_key: 0x5A, no exclusions
+```
+
+### Full Configuration
+
+```yaml
+passes:
+  string_encrypt:
+    xor_key: 0x5A              # XOR key (0-255, default: 0x5A)
+    exclude_patterns:          # Regex patterns to skip
+      - "^https://"
+      - "^http://"
+      - "^package:"
+```
+
+<Accordion title="xor_key">
+  **Type**: `int` (0-255)  
+  **Default**: `0x5A` (90 in decimal)
+  
+  The XOR key used for encoding. Choose any byte value (0-255). Using a different key for each build adds another layer of obfuscation.
+  
+  ```yaml
+  string_encrypt:
+    xor_key: 0xA3  # Use 0xA3 instead of default 0x5A
+  ```
+</Accordion>
+
+<Accordion title="exclude_patterns">
+  **Type**: `List<String>` (regex patterns)  
+  **Default**: `[]` (empty list)
+  
+  Regular expressions to match against string values. Matching strings are **not encrypted**. Useful for:
+  
+  - URLs that need to stay plaintext
+  - Package import URIs
+  - Configuration strings
+  - Strings used in native bindings
+  
+  ```yaml
+  string_encrypt:
+    exclude_patterns:
+      - "^https://"      # Skip HTTPS URLs
+      - "^dart:"         # Skip Dart SDK URIs
+      - "^[A-Z_]+$"      # Skip all-caps constants
+  ```
+</Accordion>
+
+## What Gets Encrypted
+
+The pass encrypts all `StringLiteral` nodes that are:
+
+- In user libraries (matching your project scope)
+- Not in a const context
+- Not in annotations
+- Not matching any `exclude_patterns`
+
+### Encrypted Examples
+
+```dart
+// ✅ Encrypted
+print("Hello World");
+String apiKey = "secret-key-123";
+var message = "User ${userId} logged in";
+
+// ✅ Encrypted (interpolated strings become StringLiterals)
+String greeting = "Welcome, $userName!";
+```
+
+### Skipped Examples
+
+```dart
+// ❌ Not encrypted: const context
+const String appName = "MyApp";
+
+// ❌ Not encrypted: annotation
+@JsonKey(name: 'user_id')
+final int userId;
+
+// ❌ Not encrypted: matches exclude_patterns
+String url = "https://api.example.com";  // Excluded by "^https://"
+```
+
+<Warning>
+Const strings cannot be encrypted because they must be compile-time constants. The pass automatically skips them.
+</Warning>
+
+## The Decoder Function
+
+The pass injects this decoder function (lib/src/engine/passes/string_encrypt/string_encrypt_pass.dart:49):
+
+```dart
+String _obfDecode$(List<int> bytes, int key) =>
+    String.fromCharCodes(bytes.map((b) => b ^ key));
+```
+
+### Injection Process
+
+<Steps>
+  <Step title="Find Target Library">
+    The pass finds the first user library in the component that matches your project scope.
+  </Step>
+  
+  <Step title="Build Kernel AST">
+    Construct the decoder function as a kernel `Procedure` node with:
+    - Two parameters: `List<int> bytes`, `int key`
+    - Return type: `String`
+    - Body: `String.fromCharCodes(bytes.map((b) => b ^ key))`
+  </Step>
+  
+  <Step title="Add to Library">
+    Call `lib.addProcedure(procedure)` to inject it into the library's top-level procedures.
+  </Step>
+</Steps>
+
+<Info>
+The decoder function is built entirely using kernel AST nodes — no source code generation. This ensures it's correctly typed and optimizable by the Dart VM.
+</Info>
+
+### Decoder Name
+
+The function is named `_obfDecode$` by default. If the Rename Pass runs first, this name gets obfuscated:
+
+```yaml
+passes:
+  rename: true
+  string_encrypt: true
+```
+
+Result:
+```dart
+String _$0(List<int> _$1, int _$2) =>  // Obfuscated decoder name
+    String.fromCharCodes(_$1.map((_$3) => _$3 ^ _$2));
+```
+
+## Before and After Examples
+
+### Example 1: Simple String
+
+**Before:**
+```dart
+void greet() {
+  print("Hello, World!");
+}
+```
+
+**After** (with `xor_key: 0x5A`):
+```dart
+void greet() {
+  print(_obfDecode$([34, 59, 62, 62, 61, 14, 0, 35, 61, 56, 62, 58, 11], 90));
+}
+```
+
+The string `"Hello, World!"` is now invisible in the binary — only the encrypted bytes appear.
+
+### Example 2: String Interpolation
+
+**Before:**
+```dart
+String welcomeMessage(String name) {
+  return "Welcome, $name!";
+}
+```
+
+**After:**
+```dart
+String welcomeMessage(String name) {
+  return _obfDecode$([37, 59, 62, 57, 61, 63, 59, 14, 0], 90) + 
+         name + 
+         _obfDecode$([11], 90);
+}
+```
+
+<Note>
+String interpolation gets compiled to concatenation in kernel bytecode. Each literal part is encrypted separately.
+</Note>
+
+### Example 3: Excluded Patterns
+
+**Configuration:**
+```yaml
+string_encrypt:
+  xor_key: 0x5A
+  exclude_patterns:
+    - "^https://"
+```
+
+**Code:**
+```dart
+void fetchData() {
+  String apiUrl = "https://api.example.com";  // Not encrypted
+  String message = "Fetching data...";        // Encrypted
+}
+```
+
+**Result:**
+```dart
+void fetchData() {
+  String apiUrl = "https://api.example.com";  // Preserved
+  String message = _obfDecode$([..], 90);      // Encrypted
+}
+```
+
+## Implementation Details
+
+### Transformer Logic
+
+The `StringEncryptTransformer` tracks context to avoid encrypting invalid strings (lib/src/engine/passes/string_encrypt/string_encrypt_transformer.dart:5):
+
+```dart
+class StringEncryptTransformer extends PassTransformer {
+  int _constDepth = 0;
+  int _annotationDepth = 0;
+  
+  bool get _inConstContext => _constDepth > 0 || _annotationDepth > 0;
+  
+  @override
+  TreeNode visitStringLiteral(StringLiteral node) {
+    if (_inConstContext) return node;  // Skip const strings
+    
+    for (final pattern in context.options.stringExcludePatterns) {
+      if (pattern.hasMatch(node.value)) return node;  // Skip excluded
+    }
+    
+    // Encrypt and replace with decoder call
+    final encoded = pass.encode(node.value);
+    return StaticInvocation(
+      decodeProcedure,
+      Arguments([ListLiteral(encoded), IntLiteral(xorKey)]),
+    );
+  }
+}
+```
+
+### Const Context Tracking
+
+The transformer increments depth counters when entering const contexts:
+
+```dart
+@override
+TreeNode visitConstantExpression(ConstantExpression node) {
+  _constDepth++;
+  try {
+    return super.visitConstantExpression(node);
+  } finally {
+    _constDepth--;
+  }
+}
+```
+
+This ensures const strings remain unencrypted:
+
+```dart
+const String APP_NAME = "MyApp";  // _constDepth = 1, skipped
+```
+
+### Annotation Skipping
+
+Annotations are visited separately to prevent encryption (lib/src/engine/passes/string_encrypt/string_encrypt_transformer.dart:38):
+
+```dart
+@override
+TreeNode visitProcedure(Procedure node) {
+  // Skip annotation processing
+  _annotationDepth++;
+  for (var i = 0; i < node.annotations.length; i++) {
+    node.annotations[i] = node.annotations[i].accept(this) as Expression;
+  }
+  _annotationDepth--;
+  
+  // Transform function body normally
+  node.function = node.function.accept(this) as FunctionNode;
+  return node;
+}
+```
+
+## Performance Considerations
+
+### Runtime Cost
+
+**Decoding overhead**: Each encrypted string incurs a small XOR operation at first use.
+
+```dart
+String _obfDecode$(List<int> bytes, int key) =>
+    String.fromCharCodes(bytes.map((b) => b ^ key));
+```
+
+For a 20-character string:
+- 20 XOR operations (trivial)
+- UTF-8 decoding (built-in VM operation)
+
+**Impact**: Negligible for most applications. Microseconds per string.
+
+<Tip>
+The Dart VM may optimize repeated decoder calls. Hot strings (used frequently) should be cached:
+
+```dart
+final cachedMessage = _obfDecode$([...], 90);  // Decode once
+for (var i = 0; i < 1000; i++) {
+  print(cachedMessage);  // Reuse decoded string
+}
+```
+</Tip>
+
+### Binary Size
+
+**Increases by**:
+- Decoder function: ~200-500 bytes (injected once)
+- Encrypted strings: ~same size as original (UTF-8 bytes → int literals)
+
+**Net impact**: +0.1% to +1% depending on string density in your code.
+
+### Decompilation Resistance
+
+**Without encryption**:
+```dart
+print("Admin API key: sk-1234567890");  // Visible in strings section
+```
+
+Decompilers extract the string directly from the binary.
+
+**With encryption**:
+```dart
+print(_obfDecode$([43, 58, 63, 55, 60, ..., 42], 90));
+```
+
+Decompilers see encrypted bytes. Reversing requires:
+1. Finding the decoder function
+2. Extracting the XOR key
+3. Decoding all byte arrays
+
+This significantly raises the difficulty bar.
+
+<Warning>
+XOR is not cryptographically secure. Determined attackers can reverse it. Use String Encryption to deter casual reverse engineering, not to protect highly sensitive secrets.
+</Warning>
+
+## Best Practices
+
+### Exclude Patterns
+
+Always exclude patterns that need to stay plaintext:
+
+```yaml
+string_encrypt:
+  exclude_patterns:
+    - "^https?://"          # URLs (may be validated/logged)
+    - "^package:"           # Dart package URIs
+    - "^dart:"              # SDK library URIs
+    - "^[A-Z_]+$"           # All-caps constants (conventions)
+    - "^\\s*$"              # Whitespace-only strings
+```
+
+### Rotate XOR Keys
+
+Change the `xor_key` for each release to prevent reuse attacks:
+
+```yaml
+string_encrypt:
+  xor_key: 0xA3  # Different key per build
+```
+
+<Tip>
+Generate a random key in your CI/CD pipeline:
+
+```bash
+XOR_KEY=$(shuf -i 1-255 -n 1)
+sed -i "s/xor_key: .*/xor_key: 0x$(printf '%X' $XOR_KEY)/" refractor.yaml
+```
+</Tip>
+
+### Combine with Rename
+
+Run Rename before String Encryption to obfuscate the decoder function name:
+
+```yaml
+passes:
+  rename: true           # Runs first
+  string_encrypt: true   # Decoder gets renamed to _$0
+```
+
+### Cache Decoded Strings
+
+For hot-path strings, cache the decoded result:
+
+```dart
+// Bad: decodes on every call
+void logError() {
+  for (var i = 0; i < 1000; i++) {
+    logger.error(_obfDecode$([...], 90));  // Decodes 1000 times
+  }
+}
+
+// Good: decode once
+void logError() {
+  final msg = _obfDecode$([...], 90);  // Decode once
+  for (var i = 0; i < 1000; i++) {
+    logger.error(msg);  // Reuse
+  }
+}
+```
+
+## Limitations
+
+### Const Strings
+
+Const strings cannot be encrypted:
+
+```dart
+const String APP_NAME = "MyApp";  // Cannot be encrypted
+```
+
+Dart requires const values at compile time. Runtime decoding violates this.
+
+**Workaround**: Use regular `final` variables:
+
+```dart
+final String APP_NAME = _obfDecode$([...], 90);  // Works
+```
+
+### Annotations
+
+Annotation arguments stay plaintext:
+
+```dart
+@JsonKey(name: 'user_id')  // 'user_id' not encrypted
+final int userId;
+```
+
+**Reason**: Annotations are evaluated at compile time for code generation.
+
+### Switch Case Labels
+
+Switch case labels must be const:
+
+```dart
+switch (command) {
+  case "start":  // Cannot be encrypted (const required)
+    start();
+    break;
+}
+```
+
+**Workaround**: Use `if-else` or maps:
+
+```dart
+final commands = {
+  _obfDecode$([...], 90): start,  // Encrypted keys
+};
+commands[command]?.call();
+```
+
+## Troubleshooting
+
+<Accordion title="Error: 'Cannot invoke const constructor in non-const context'">
+  You tried to encrypt a string in a const context. Use `exclude_patterns` or change to `final`:
+  
+  ```yaml
+  string_encrypt:
+    exclude_patterns:
+      - "^MyConstString$"
+  ```
+</Accordion>
+
+<Accordion title="URLs are broken after encryption">
+  Add URL patterns to `exclude_patterns`:
+  
+  ```yaml
+  string_encrypt:
+    exclude_patterns:
+      - "^https?://"
+  ```
+</Accordion>
+
+<Accordion title="Annotations contain encrypted strings">
+  This shouldn't happen — annotations are automatically skipped. File a bug report if you see encrypted annotation strings.
+</Accordion>
+
+<Accordion title="Performance is slow">
+  Check if you're decoding the same string repeatedly in a hot loop. Cache decoded strings instead.
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Dead Code Injection" icon="code-branch" href="/obfuscation/dead-code">
+    Insert unreachable branches to confuse decompilers
+  </Card>
+  
+  <Card title="Obfuscation Overview" icon="shield" href="/obfuscation/overview">
+    Understand how all passes work together
+  </Card>
+</CardGroup>

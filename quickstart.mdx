@@ -1,80 +1,361 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Build your first obfuscated Dart application in minutes"
 ---
 
-## Get started in three steps
+<Warning>
+  Refractor is in early development. The real impact on generated binaries may differ from expected results. Always test thoroughly.
+</Warning>
 
-Get your documentation site running locally and make your first customization.
+## What You'll Build
 
-### Step 1: Set up your local environment
+In this guide, you'll:
+- Create a configuration file for Refractor
+- Obfuscate a Dart application
+- Inspect the obfuscated output
+- Understand the symbol map for debugging
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+## Prerequisites
 
-### Step 2: Deploy your changes
+- [Dart SDK 3.10.0+](/installation#prerequisites) installed
+- [Refractor installed globally](/installation)
+- A Dart project with a `lib/main.dart` file
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+<Info>
+  Don't have a project? Create one with `dart create -t console my_app && cd my_app`
+</Info>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Get Started
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+<Steps>
+  <Step title="Navigate to your Dart project">
+    Open your terminal and navigate to your Dart project directory:
 
-### Step 3: Go live
+    ```bash
+    cd path/to/your/dart/project
+    ```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    Your project should have a structure like:
 
-## Next steps
+    ```
+    my_app/
+    ├── lib/
+    │   └── main.dart
+    ├── pubspec.yaml
+    └── ...
+    ```
+  </Step>
 
-Now that you have your docs running, explore these key features:
+  <Step title="Generate a configuration file">
+    Create a `refractor.yaml` configuration file:
+
+    ```bash
+    refractor init
+    ```
+
+    Output:
+    ```
+    ✓ Created refractor.yaml
+    ```
+
+    This generates a starter configuration with sensible defaults:
+
+    ```yaml refractor.yaml
+    # Refractor configuration
+    # Modeled after analysis_options.yaml for Dart developer familiarity.
+    # See: https://github.com/yardexx/refractor
+
+    # Global tool settings.
+    refractor:
+      # Output path for the symbol map (original → obfuscated name mapping).
+      # symbol_map: build/refractor_map.json
+
+      # Scope is fixed to the current project (pubspec package + current folder).
+
+      # Library URI/path exclusions using glob patterns.
+      # exclude:
+      #   - "**/*.g.dart"
+      #   - "**/*.freezed.dart"
+
+    # Pass configuration — enable/disable and configure each pass.
+    # Use `true` for defaults, `false` to disable, or a map for custom settings.
+    passes:
+      rename:
+        # preserve_main: true
+
+      string_encrypt: true
+      # string_encrypt:
+      #   xor_key: 0x5A
+      #   exclude_patterns:
+      #     - "^https://"
+
+      dead_code: false
+
+    # Verbose logging.
+    # verbose: false
+    ```
+
+    <Tip>
+      You can customize the output path with `refractor init --output config/refractor.yaml`
+    </Tip>
+  </Step>
+
+  <Step title="Run your first build">
+    Compile, obfuscate, and build your application:
+
+    ```bash
+    refractor build
+    ```
+
+    Output:
+    ```
+    ✓ Compiling lib/main.dart to kernel...
+    ✓ Applying obfuscation passes...
+      → rename
+      → string_encrypt
+    ✓ Building executable...
+    ✓ Writing symbol map...
+    ✓ Build complete: build/out.exe
+    ```
+
+    <Info>
+      By default, Refractor:
+      - Compiles `lib/main.dart`
+      - Outputs to `build/out.exe` (or `.dill`, `.aot`, `.jit` depending on target)
+      - Applies only the passes enabled in `refractor.yaml`
+    </Info>
+  </Step>
+
+  <Step title="Test your obfuscated binary">
+    Run the generated executable:
+
+    ```bash
+    ./build/out.exe
+    ```
+
+    The application should run normally, but the internal code is now obfuscated!
+  </Step>
+</Steps>
+
+## Understanding the Output
+
+After running `refractor build`, you'll see:
+
+```
+my_app/
+├── build/
+│   ├── out.exe           # Obfuscated executable
+│   └── refractor_map.json  # Symbol map (if configured)
+├── lib/
+│   └── main.dart
+├── refractor.yaml
+└── pubspec.yaml
+```
+
+### Symbol Map
+
+The symbol map (`refractor_map.json`) contains the mapping of original names to obfuscated names. This is useful for debugging:
+
+```json
+{
+  "classes": {
+    "MyClass": "a",
+    "UserService": "b",
+    "DataRepository": "c"
+  },
+  "methods": {
+    "calculateTotal": "d",
+    "fetchData": "e",
+    "processItems": "f"
+  },
+  "fields": {
+    "userName": "g",
+    "userId": "h",
+    "accountBalance": "i"
+  }
+}
+```
+
+<Warning>
+  **Never commit the symbol map to version control** if you want to maintain obfuscation security. Add it to `.gitignore`:
+  
+  ```bash
+  echo "build/refractor_map.json" >> .gitignore
+  ```
+</Warning>
+
+## Customizing the Build
+
+Refractor supports multiple build targets and options:
+
+<CodeGroup>
+
+```bash Executable (default)
+refractor build --target exe --output build
+```
+
+```bash Kernel File
+refractor build --target kernel --output build
+```
+
+```bash AOT Snapshot
+refractor build --target aot --output build
+```
+
+```bash JIT Snapshot
+refractor build --target jit --output build
+```
+
+```bash Custom Input
+refractor build --input bin/app.dart --output dist
+```
+
+</CodeGroup>
+
+## Inspect Obfuscated Kernel
+
+To verify the obfuscation, inspect the compiled kernel file:
+
+```bash
+refractor build --target kernel
+refractor inspect build/out.dill
+```
+
+Output:
+```
+Library: package:my_app/main.dart
+  Class: a (was: MyClass)
+    Field: g (was: userName)
+    Method: d (was: calculateTotal)
+  Function: main
+    ...
+```
+
+<Tip>
+  Add the `--sdk` flag to include Dart core libraries in the inspection output:
+  
+  ```bash
+  refractor inspect --sdk build/out.dill
+  ```
+</Tip>
+
+## Real-World Example
+
+Let's obfuscate a simple application with multiple obfuscation passes:
+
+<Steps>
+  <Step title="Create example app">
+    ```dart lib/main.dart
+    import 'dart:async';
+    import 'dart:math';
+
+    void main(List<String> args) async {
+      final app = Application(
+        config: AppConfig(
+          appName: 'ObfuscatorTest',
+          version: 1,
+          flags: {'experimental': true},
+        ),
+      );
+
+      await app.start();
+
+      final service = RandomService(seed: 42);
+      print('Random value: ${service.next()}');
+    }
+
+    class Application<T extends BaseConfig> {
+      final T config;
+      Application({required this.config});
+
+      Future<void> start() async {
+        print('Starting ${config.appName} v${config.version}');
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+
+    abstract class BaseConfig {
+      String get appName;
+      int get version;
+      Map<String, bool> get flags;
+    }
+
+    class AppConfig implements BaseConfig {
+      final String appName;
+      final int version;
+      final Map<String, bool> flags;
+
+      const AppConfig({
+        required this.appName,
+        required this.version,
+        required this.flags,
+      });
+    }
+
+    class RandomService {
+      final Random _random;
+      RandomService({int? seed}) : _random = Random(seed);
+      int next() => _random.nextInt(100);
+    }
+    ```
+  </Step>
+
+  <Step title="Configure obfuscation">
+    ```yaml refractor.yaml
+    refractor:
+      symbol_map: build/symbols.json
+      exclude:
+        - "**/*.g.dart"
+
+    passes:
+      rename:
+        preserve_main: true
+
+      string_encrypt:
+        xor_key: 0x5A
+        exclude_patterns:
+          - "^https://"
+
+      dead_code:
+        max_insertions_per_procedure: 2
+    ```
+  </Step>
+
+  <Step title="Build and run">
+    ```bash
+    refractor build --target exe
+    ./build/out.exe
+    ```
+
+    Output:
+    ```
+    Starting ObfuscatorTest v1
+    Random value: 51
+    ```
+
+    The application works identically, but:
+    - Class/method/field names are shortened (e.g., `Application` → `a`)
+    - String literals are XOR-encrypted
+    - Dead code branches are injected into methods
+  </Step>
+</Steps>
+
+## Next Steps
 
 <CardGroup cols={2}>
+  <Card title="Commands" icon="terminal" href="/commands/build">
+    Explore all CLI commands and options
+  </Card>
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+  <Card title="Configuration" icon="gear" href="/configuration/refractor-yaml">
+    Deep dive into refractor.yaml settings
+  </Card>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+  <Card title="Obfuscation Passes" icon="shield" href="/obfuscation/overview">
+    Learn about rename, string encryption, and dead code
+  </Card>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Build Targets" icon="bullseye-arrow" href="/guides/build-targets">
+    Understand exe, AOT, JIT, and kernel outputs
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

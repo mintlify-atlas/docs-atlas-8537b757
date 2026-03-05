@@ -1,0 +1,160 @@
+---
+title: Compiler
+description: Abstract interface for compiling Dart source to kernel and target formats
+---
+
+## Overview
+
+The `Compiler` interface provides an abstraction for compiling Dart source code to kernel format (`.dill` files) and to various target formats like executables, AOT snapshots, and JIT snapshots.
+
+<Info>
+The `Compiler` interface is defined in the pure engine layer without `dart:io` dependencies, allowing `RefractorEngine` to use it without platform constraints.
+</Info>
+
+## Target Enum
+
+Defines valid compilation targets for `dart compile`.
+
+```dart
+enum Target {
+  exe('exe', ''),
+  aot('aot-snapshot', '.aot'),
+  jit('jit-snapshot', '.jit'),
+  kernel('kernel', '.dill');
+
+  const Target(this.value, this.extension);
+  factory Target.fromString(String target);
+
+  final String value;
+  final String extension;
+}
+```
+
+### Target Values
+
+<CardGroup cols={2}>
+  <Card title="exe" icon="gear">
+    Compiles to native executable with no extension
+  </Card>
+  <Card title="aot" icon="bolt">
+    AOT snapshot format with `.aot` extension
+  </Card>
+  <Card title="jit" icon="rocket">
+    JIT snapshot format with `.jit` extension
+  </Card>
+  <Card title="kernel" icon="cube">
+    Kernel bytecode with `.dill` extension
+  </Card>
+</CardGroup>
+
+## Compiler Interface
+
+```dart
+abstract class Compiler {
+  void compileToKernel(String sourcePath, String outputPath);
+  void compileToTarget(String dillPath, String outputPath, Target target);
+}
+```
+
+### compileToKernel()
+
+Compile Dart source at `sourcePath` to kernel `.dill` at `outputPath`.
+
+<ParamField path="sourcePath" type="String" required>
+  Path to the Dart source file or package to compile
+</ParamField>
+
+<ParamField path="outputPath" type="String" required>
+  Path where the compiled kernel `.dill` file will be written
+</ParamField>
+
+### compileToTarget()
+
+Compile kernel `.dill` at `dillPath` to the given target format at `outputPath`.
+
+<ParamField path="dillPath" type="String" required>
+  Path to the kernel `.dill` file to compile
+</ParamField>
+
+<ParamField path="outputPath" type="String" required>
+  Path where the compiled output will be written
+</ParamField>
+
+<ParamField path="target" type="Target" required>
+  Target format: `Target.exe`, `Target.aot`, `Target.jit`, or `Target.kernel`
+</ParamField>
+
+## DartCompiler Implementation
+
+`DartCompiler` is the concrete implementation that uses the `dart` CLI tool.
+
+```dart
+class DartCompiler implements Compiler {
+  DartCompiler({this.verbose = false});
+  final bool verbose;
+
+  @override
+  void compileToKernel(String sourcePath, String outputPath);
+
+  @override
+  void compileToTarget(String dillPath, String outputPath, Target target);
+}
+```
+
+<ParamField path="verbose" type="bool" default="false">
+  Enable verbose output during compilation
+</ParamField>
+
+## Usage Example
+
+```dart
+import 'package:refractor/refractor.dart';
+import 'package:refractor/src/engine/compiler/dart_compiler.dart';
+
+void main() {
+  // Create a compiler instance
+  final compiler = DartCompiler(verbose: true);
+
+  // Compile Dart source to kernel
+  compiler.compileToKernel(
+    'lib/main.dart',
+    'build/app.dill',
+  );
+
+  // Compile kernel to executable
+  compiler.compileToTarget(
+    'build/app.dill',
+    'build/app.exe',
+    Target.exe,
+  );
+
+  // Or compile to AOT snapshot
+  compiler.compileToTarget(
+    'build/app.dill',
+    'build/app.aot',
+    Target.aot,
+  );
+}
+```
+
+<Note>
+The `Compiler` interface is used internally by `RefractorEngine` to compile source code before and after obfuscation passes.
+</Note>
+
+## Implementation Notes
+
+- `DartCompiler` invokes the `dart compile` command via process execution
+- The `verbose` flag controls whether compilation output is shown
+- All compilation operations are synchronous
+- Errors during compilation will throw exceptions
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="KernelIO" icon="file" href="/api/compiler/kernel-io">
+    Load and write kernel components
+  </Card>
+  <Card title="RefractorEngine" icon="engine" href="/api/refractor-engine">
+    Main obfuscation engine
+  </Card>
+</CardGroup>

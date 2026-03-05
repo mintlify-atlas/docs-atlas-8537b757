@@ -1,0 +1,265 @@
+---
+title: 'Build Targets'
+description: 'Understanding Refractor build targets and choosing the right output format'
+---
+
+Refractor supports four build targets, each optimized for different deployment scenarios. All targets go through the same obfuscation pipeline, but produce different final output formats.
+
+## Available Targets
+
+The `Target` enum defines four compilation targets:
+
+```dart
+enum Target {
+  exe('exe', ''),
+  aot('aot-snapshot', '.aot'),
+  jit('jit-snapshot', '.jit'),
+  kernel('kernel', '.dill')
+}
+```
+
+Source: `lib/src/engine/compiler/compiler.dart:6-11`
+
+## Target Details
+
+<CardGroup cols={2}>
+  <Card title="exe" icon="file-binary">
+    Native executable with the Dart VM embedded. Self-contained and ready to run.
+  </Card>
+  <Card title="aot" icon="bolt">
+    AOT snapshot for pre-compiled native code. Fastest startup and execution.
+  </Card>
+  <Card title="jit" icon="rocket">
+    JIT snapshot with optimized bytecode. Requires Dart runtime to execute.
+  </Card>
+  <Card title="kernel" icon="cube">
+    Raw kernel bytecode (.dill). Intermediate format for further processing.
+  </Card>
+</CardGroup>
+
+### Executable (exe)
+
+**File Extension:** None (platform-specific executable)
+
+**Use Cases:**
+- Standalone CLI tools
+- Desktop applications
+- Production deployments where no Dart SDK is available
+
+**Build Command:**
+```bash
+refractor build --target exe --output build
+```
+
+**Characteristics:**
+- Self-contained binary with embedded Dart VM
+- Largest file size (includes runtime)
+- No external dependencies
+- Platform-specific (Windows .exe, macOS/Linux binary)
+
+### AOT Snapshot (aot)
+
+**File Extension:** `.aot`
+
+**Use Cases:**
+- Performance-critical applications
+- Server-side deployments
+- Mobile apps (Flutter)
+- Minimal startup time requirements
+
+**Build Command:**
+```bash
+refractor build --target aot --output build
+```
+
+**Characteristics:**
+- Pre-compiled to native machine code
+- Fastest execution and startup
+- Requires `dartaotruntime` to execute
+- Smaller than exe, larger than JIT
+- Best runtime performance
+
+### JIT Snapshot (jit)
+
+**File Extension:** `.jit`
+
+**Use Cases:**
+- Development and testing
+- Applications with dynamic code patterns
+- Scenarios where AOT restrictions apply
+
+**Build Command:**
+```bash
+refractor build --target jit --output build
+```
+
+**Characteristics:**
+- Optimized bytecode with type feedback
+- Requires full Dart VM to execute
+- Smaller file size than AOT
+- Slower startup than AOT
+- Supports dynamic features better than AOT
+
+### Kernel (kernel)
+
+**File Extension:** `.dill`
+
+**Use Cases:**
+- Inspecting obfuscated bytecode
+- Further processing or analysis
+- Integration with custom tooling
+- Debugging obfuscation passes
+
+**Build Command:**
+```bash
+refractor build --target kernel --output build
+```
+
+**Characteristics:**
+- Raw Dart kernel intermediate representation
+- Can be inspected with `refractor inspect`
+- Smallest file size
+- Not directly executable
+- Platform-independent
+
+## Build Pipeline
+
+All targets follow the same obfuscation pipeline:
+
+<Steps>
+  <Step title="Compile to Kernel">
+    Source code is compiled to intermediate `.dill` format:
+    
+    ```dart
+    compiler.compileToKernel(request.input, dillPath);
+    ```
+  </Step>
+  
+  <Step title="Run Obfuscation Passes">
+    Enabled passes (rename, string_encrypt, dead_code) transform the kernel:
+    
+    ```dart
+    final (obfuscated, symbolTable) = runner.run(component, config.toOptions());
+    ```
+  </Step>
+  
+  <Step title="Compile to Target">
+    For exe/aot/jit, the obfuscated kernel is compiled to the final format:
+    
+    ```dart
+    compiler.compileToTarget(obfuscatedDillPath, request.output, request.target);
+    ```
+    
+    For kernel target, the obfuscated `.dill` is written directly:
+    
+    ```dart
+    kernelIO.write(obfuscated, request.output);
+    ```
+  </Step>
+</Steps>
+
+Source: `lib/src/engine/engine.dart:39-85`
+
+## Performance Comparison
+
+| Target | File Size | Startup Time | Runtime Performance | Deployment |
+|--------|-----------|--------------|---------------------|------------|
+| exe    | Largest   | Fast         | Very Fast           | Easiest    |
+| aot    | Large     | Fastest      | Fastest             | Requires runtime |
+| jit    | Medium    | Medium       | Fast                | Requires VM |
+| kernel | Smallest  | N/A          | N/A                 | Not executable |
+
+## Choosing the Right Target
+
+<AccordionGroup>
+  <Accordion title="When to use exe">
+    Choose `exe` when:
+    - You need a single file with no dependencies
+    - Distributing to users without Dart SDK
+    - Building CLI tools or standalone apps
+    - File size is not a critical constraint
+  </Accordion>
+  
+  <Accordion title="When to use aot">
+    Choose `aot` when:
+    - Performance is the top priority
+    - You're deploying to servers with `dartaotruntime`
+    - Building Flutter mobile apps
+    - You need the fastest possible startup
+  </Accordion>
+  
+  <Accordion title="When to use jit">
+    Choose `jit` when:
+    - You need dynamic code features
+    - File size matters more than startup time
+    - Deploying to environments with Dart VM
+    - AOT compilation limitations are blocking
+  </Accordion>
+  
+  <Accordion title="When to use kernel">
+    Choose `kernel` when:
+    - Inspecting obfuscation results
+    - Building custom tooling
+    - Debugging pass behavior
+    - You need platform-independent bytecode
+  </Accordion>
+</AccordionGroup>
+
+## Inspecting Kernel Output
+
+You can inspect any `.dill` file (including intermediate and final kernel targets) using:
+
+```bash
+refractor inspect build/app.dill
+```
+
+This prints a tree representation of the kernel structure, useful for verifying obfuscation.
+
+<Tip>
+Use `--sdk` flag to include Dart standard library internals:
+```bash
+refractor inspect --sdk build/app.dill
+```
+</Tip>
+
+## Target Selection Examples
+
+<CodeGroup>
+```bash Default (exe)
+refractor build
+# Outputs: build/app (or build/app.exe on Windows)
+```
+
+```bash AOT for Performance
+refractor build --target aot --output dist
+# Outputs: dist/app.aot
+# Run with: dartaotruntime dist/app.aot
+```
+
+```bash JIT for Compatibility
+refractor build --target jit --input lib/main.dart
+# Outputs: build/app.jit
+# Run with: dart run build/app.jit
+```
+
+```bash Kernel for Inspection
+refractor build --target kernel
+# Outputs: build/app.dill
+# Inspect with: refractor inspect build/app.dill
+```
+</CodeGroup>
+
+<Warning>
+The `kernel` target produces a `.dill` file that is **not directly executable**. It must be run through `dart` or compiled to another target format.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/essentials/configuration">
+    Configure obfuscation passes and settings
+  </Card>
+  <Card title="Debugging" icon="bug" href="/guides/debugging-obfuscated-code">
+    Learn to debug obfuscated builds with symbol maps
+  </Card>
+</CardGroup>

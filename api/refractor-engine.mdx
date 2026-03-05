@@ -1,0 +1,184 @@
+---
+title: RefractorEngine
+description: Main orchestration engine for the Dart kernel obfuscation pipeline
+---
+
+## Overview
+
+The `RefractorEngine` class orchestrates the full compile → obfuscate → compile pipeline. It's a pure engine-layer class that depends on abstract `Compiler` and `KernelIO` interfaces, allowing you to provide custom IO-layer implementations.
+
+## Constructor
+
+```dart
+RefractorEngine({
+  required Compiler compiler,
+  required KernelIO kernelIO,
+  Logger? logger,
+})
+```
+
+<ParamField path="compiler" type="Compiler" required>
+  Implementation of the `Compiler` interface for compiling Dart source to kernel and to target formats
+</ParamField>
+
+<ParamField path="kernelIO" type="KernelIO" required>
+  Implementation of the `KernelIO` interface for loading and writing kernel `.dill` files
+</ParamField>
+
+<ParamField path="logger" type="Logger?">
+  Optional Mason logger for detailed build progress messages
+</ParamField>
+
+## Methods
+
+### run()
+
+Executes the complete obfuscation pipeline: compile source to kernel, run obfuscation passes, write obfuscated kernel, and compile to target format.
+
+```dart
+Result<BuildResult> run({
+  required RefractorConfig config,
+  required BuildRequest request,
+})
+```
+
+<ParamField path="config" type="RefractorConfig" required>
+  Configuration object specifying which passes to enable and their options
+</ParamField>
+
+<ParamField path="request" type="BuildRequest" required>
+  Build parameters including input/output paths, target format, and work directory
+</ParamField>
+
+<ResponseField name="Result<BuildResult>" type="Result<BuildResult>">
+  Returns `Ok(BuildResult)` on success, containing output path, symbol table, and list of passes run
+</ResponseField>
+
+## Supporting Classes
+
+### BuildRequest
+
+Bundles the IO parameters for a `RefractorEngine.run()` invocation.
+
+```dart
+class BuildRequest {
+  const BuildRequest({
+    required String input,
+    required String output,
+    required Target target,
+    required String workDirectory,
+  });
+}
+```
+
+<ParamField path="input" type="String" required>
+  Path to the Dart entry point file (e.g., `lib/main.dart`)
+</ParamField>
+
+<ParamField path="output" type="String" required>
+  Path where the final compiled output should be written
+</ParamField>
+
+<ParamField path="target" type="Target" required>
+  Compilation target: `Target.exe`, `Target.aot`, `Target.jit`, or `Target.kernel`
+</ParamField>
+
+<ParamField path="workDirectory" type="String" required>
+  Directory for intermediate build artifacts (e.g., `.dart_tool/refractor`)
+</ParamField>
+
+### BuildResult
+
+Result of a successful `RefractorEngine.run()` invocation.
+
+```dart
+class BuildResult {
+  BuildResult({
+    required String outputPath,
+    required SymbolTable symbolTable,
+    required List<String> passesRun,
+  });
+}
+```
+
+<ResponseField name="outputPath" type="String">
+  The final output path where the compiled artifact was written
+</ResponseField>
+
+<ResponseField name="symbolTable" type="SymbolTable">
+  Symbol table containing mappings from original to obfuscated identifiers
+</ResponseField>
+
+<ResponseField name="passesRun" type="List<String>">
+  Names of all obfuscation passes that were executed
+</ResponseField>
+
+### Target
+
+Enum representing valid compilation targets.
+
+```dart
+enum Target {
+  exe,      // Native executable
+  aot,      // AOT snapshot
+  jit,      // JIT snapshot  
+  kernel,   // Kernel .dill file
+}
+```
+
+## Usage Example
+
+```dart
+import 'package:refractor/refractor.dart';
+
+void main() {
+  final engine = RefractorEngine(
+    compiler: DartCompiler(),
+    kernelIO: FileKernelIO(),
+  );
+
+  final result = engine.run(
+    config: RefractorConfig(
+      passes: [RenamePass(), StringEncryptPass()],
+    ),
+    request: BuildRequest(
+      input: 'lib/main.dart',
+      output: 'build/out',
+      target: Target.exe,
+      workDirectory: '.dart_tool/refractor',
+    ),
+  );
+
+  result.when(
+    ok: (buildResult) {
+      print('Build complete: ${buildResult.outputPath}');
+      print('Passes run: ${buildResult.passesRun}');
+      print('Symbols mapped: ${buildResult.symbolTable.size}');
+    },
+    err: (error) => print('Build failed: $error'),
+  );
+}
+```
+
+<Note>
+  The engine handles the complete pipeline automatically:
+  1. Compiles source to kernel `.dill`
+  2. Loads kernel and runs obfuscation passes
+  3. Writes obfuscated kernel
+  4. Compiles to final target format (or outputs `.dill` for kernel target)
+</Note>
+
+<Warning>
+  For `Target.kernel`, the engine writes the obfuscated `.dill` directly and skips the final `compileToTarget` step.
+</Warning>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="PassRunner" icon="gears" href="/api/pass-runner">
+    Orchestrates obfuscation passes over kernel components
+  </Card>
+  <Card title="SymbolTable" icon="table" href="/api/symbol-table">
+    Tracks identifier mappings for deobfuscation
+  </Card>
+</CardGroup>

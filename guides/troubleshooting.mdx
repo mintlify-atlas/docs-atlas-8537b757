@@ -1,0 +1,566 @@
+---
+title: 'Troubleshooting'
+description: 'Common issues and solutions when using Refractor'
+---
+
+This guide covers common errors, build failures, and performance issues you may encounter when using Refractor.
+
+## Configuration Errors
+
+<AccordionGroup>
+  <Accordion title="ConfigException: Configuration file not found">
+    **Error:**
+    ```
+    ConfigException: Configuration file not found: /path/to/refractor.yaml
+    Run "refractor init" to create one.
+    ```
+    
+    **Cause:**
+    Refractor requires a `refractor.yaml` file and fails fast if it's missing.
+    
+    Source: `lib/src/config/config_manager.dart:18-24`
+    
+    **Solution:**
+    
+    Create a configuration file:
+    ```bash
+    refractor init
+    ```
+    
+    Or specify a custom path:
+    ```bash
+    refractor build --config path/to/config.yaml
+    ```
+  </Accordion>
+  
+  <Accordion title="ConfigException: Configuration YAML is empty">
+    **Error:**
+    ```
+    ConfigException: Configuration file is empty: /path/to/refractor.yaml
+    ```
+    
+    **Cause:**
+    The config file exists but contains no content.
+    
+    Source: `lib/src/config/config_manager.dart:35-39`
+    
+    **Solution:**
+    
+    Populate the file with at least minimal configuration:
+    ```yaml
+    refractor:
+      symbol_map: symbol_map.json
+    
+    passes:
+      rename: true
+    ```
+  </Accordion>
+  
+  <Accordion title="ConfigException: Invalid configuration YAML">
+    **Error:**
+    ```
+    ConfigException: Invalid configuration at /path/to/refractor.yaml: ...
+    ```
+    
+    **Cause:**
+    YAML syntax error or invalid structure.
+    
+    Source: `lib/src/config/model/refractor_config.dart:36-59`
+    
+    **Solution:**
+    
+    Validate YAML syntax:
+    - Check for correct indentation (use spaces, not tabs)
+    - Ensure colons have spaces after them
+    - Verify all quoted strings are properly closed
+    
+    Use a YAML validator or run:
+    ```bash
+    refractor build --verbose
+    ```
+    
+    The verbose flag provides detailed error context.
+  </Accordion>
+  
+  <Accordion title="ConfigException: Configuration root must be a YAML mapping">
+    **Error:**
+    ```
+    ConfigException: Configuration root must be a YAML mapping/object.
+    ```
+    
+    **Cause:**
+    The YAML file starts with a list or scalar instead of a map.
+    
+    Source: `lib/src/config/model/refractor_config.dart:48-52`
+    
+    **Solution:**
+    
+    Ensure your config starts with top-level keys:
+    
+    <CodeGroup>
+    ```yaml Correct
+    refractor:
+      symbol_map: symbol_map.json
+    
+    passes:
+      rename: true
+    ```
+    
+    ```yaml Incorrect
+    - refractor:
+        symbol_map: symbol_map.json
+    ```
+    </CodeGroup>
+  </Accordion>
+  
+  <Accordion title="ConfigException: Unknown pass">
+    **Error:**
+    ```
+    ConfigException: Unknown pass: "my_pass"
+    ```
+    
+    **Cause:**
+    Referenced a pass name that doesn't exist.
+    
+    Source: `lib/src/config/model/refractor_config.dart:113`
+    
+    **Solution:**
+    
+    Only use valid pass names:
+    - `rename`
+    - `string_encrypt`
+    - `dead_code`
+    
+    Available passes are defined in:
+    ```dart
+    static List<Pass> passesFromNames(List<String> names) {
+      final available = <String, Pass>{
+        'rename': RenamePass(),
+        'string_encrypt': StringEncryptPass(),
+        'dead_code': DeadCodePass(),
+      };
+      // ...
+    }
+    ```
+    
+    Source: `lib/src/config/model/refractor_config.dart:105-116`
+  </Accordion>
+</AccordionGroup>
+
+## Build Failures
+
+<AccordionGroup>
+  <Accordion title="BuildException: Invalid target">
+    **Error:**
+    ```
+    BuildException: Invalid target: xyz
+    ```
+    
+    **Cause:**
+    Specified an unsupported build target.
+    
+    Source: `lib/src/engine/compiler/compiler.dart:26`
+    
+    **Solution:**
+    
+    Use only valid targets:
+    - `exe` - Native executable
+    - `aot` - AOT snapshot (.aot)
+    - `jit` - JIT snapshot (.jit)
+    - `kernel` - Kernel bytecode (.dill)
+    
+    ```bash
+    refractor build --target exe
+    ```
+    
+    See the [Build Targets guide](/guides/build-targets) for details.
+  </Accordion>
+  
+  <Accordion title="FileIoException: Input file not found">
+    **Error:**
+    ```
+    FileIoException: Input file not found: lib/main.dart
+    ```
+    
+    **Cause:**
+    The specified entrypoint doesn't exist.
+    
+    Exit code: `ExitCode.ioError.code`
+    
+    Source: `lib/src/exceptions/refractor_exception.dart:64-69`
+    
+    **Solution:**
+    
+    Verify the input file exists:
+    ```bash
+    ls -la lib/main.dart
+    ```
+    
+    Specify the correct path:
+    ```bash
+    refractor build --input bin/main.dart
+    ```
+  </Accordion>
+  
+  <Accordion title="CompilationException: Dart compilation failed">
+    **Error:**
+    ```
+    CompilationException: Failed to compile to kernel
+    ```
+    
+    **Cause:**
+    Syntax errors, missing dependencies, or other Dart compilation issues.
+    
+    Exit code: `ExitCode.software.code`
+    
+    Source: `lib/src/exceptions/refractor_exception.dart:47-52`
+    
+    **Solution:**
+    
+    First, verify your code compiles normally:
+    ```bash
+    dart compile exe lib/main.dart
+    ```
+    
+    Fix any compilation errors, then retry with Refractor:
+    ```bash
+    refractor build
+    ```
+    
+    Run with `--verbose` for detailed compiler output:
+    ```bash
+    refractor build --verbose
+    ```
+  </Accordion>
+  
+  <Accordion title="ProcessRunException: Command execution failed">
+    **Error:**
+    ```
+    ProcessRunException: Failed to execute dart compile
+    ```
+    
+    **Cause:**
+    Underlying process (dart compile) failed to run.
+    
+    Exit code: `ExitCode.software.code`
+    
+    Source: `lib/src/exceptions/refractor_exception.dart:54-60`
+    
+    **Solution:**
+    
+    Ensure Dart SDK is properly installed:
+    ```bash
+    dart --version
+    ```
+    
+    Check PATH environment variable includes Dart:
+    ```bash
+    which dart
+    ```
+    
+    Reinstall Dart SDK if necessary.
+  </Accordion>
+</AccordionGroup>
+
+## Pass-Specific Issues
+
+<AccordionGroup>
+  <Accordion title="Rename pass breaking reflection">
+    **Issue:**
+    Code using `dart:mirrors` or reflection fails after renaming.
+    
+    **Cause:**
+    The rename pass obfuscates identifiers, breaking code that relies on original names at runtime.
+    
+    **Solution:**
+    
+    <Steps>
+      <Step title="Identify reflection usage">
+        Search for:
+        - `dart:mirrors` imports
+        - `runtimeType.toString()`
+        - String-based lookups (e.g., JSON serialization)
+      </Step>
+      
+      <Step title="Exclude generated files">
+        Add exclusions to `refractor.yaml`:
+        ```yaml
+        refractor:
+          exclude:
+            - "**/*.g.dart"
+            - "**/*.freezed.dart"
+            - "**/models/**"
+        ```
+      </Step>
+      
+      <Step title="Preserve main entrypoint">
+        Ensure `preserve_main` is enabled:
+        ```yaml
+        passes:
+          rename:
+            preserve_main: true
+        ```
+        
+        Source: `lib/src/config/model/refractor_config.dart:73`
+      </Step>
+    </Steps>
+  </Accordion>
+  
+  <Accordion title="String encryption breaking URLs">
+    **Issue:**
+    Encrypted strings cause runtime issues with URLs or API endpoints.
+    
+    **Cause:**
+    String encryption XORs all string literals, including those that must remain readable.
+    
+    **Solution:**
+    
+    Exclude patterns from encryption:
+    ```yaml
+    passes:
+      string_encrypt:
+        xor_key: 0x5A
+        exclude_patterns:
+          - "^https://"
+          - "^http://"
+          - "^wss://"
+          - "^ws://"
+          - "^package:"
+    ```
+    
+    Source: `lib/src/config/model/refractor_config.dart:74-75`
+  </Accordion>
+  
+  <Accordion title="Dead code affecting control flow">
+    **Issue:**
+    Dead code injection changes program behavior unexpectedly.
+    
+    **Cause:**
+    The dead code pass inserts unreachable branches that should never execute, but edge cases may trigger them.
+    
+    **Solution:**
+    
+    Reduce insertion frequency:
+    ```yaml
+    passes:
+      dead_code:
+        max_insertions_per_procedure: 1
+    ```
+    
+    Or disable the pass entirely for testing:
+    ```yaml
+    passes:
+      dead_code: false
+    ```
+    
+    Source: `lib/src/config/model/refractor_config.dart:90-92`
+  </Accordion>
+</AccordionGroup>
+
+## Performance Issues
+
+<AccordionGroup>
+  <Accordion title="Slow build times">
+    **Issue:**
+    Obfuscation takes significantly longer than normal compilation.
+    
+    **Cause:**
+    Multiple passes traverse the entire kernel AST, especially on large codebases.
+    
+    **Solution:**
+    
+    <Steps>
+      <Step title="Profile which passes are slow">
+        Enable verbose logging:
+        ```bash
+        refractor build --verbose
+        ```
+        
+        This shows detailed timing for each step:
+        ```
+        Compiling lib/main.dart to kernel...
+        Running obfuscation passes...
+        Writing obfuscated kernel...
+        Compiling to target exe...
+        Build complete: build/app
+        ```
+        
+        Source: `lib/src/engine/engine.dart:44-76`
+      </Step>
+      
+      <Step title="Disable unnecessary passes">
+        If a pass isn't critical, disable it:
+        ```yaml
+        passes:
+          rename: true
+          string_encrypt: false  # Disable if not needed
+          dead_code: false       # Often the slowest
+        ```
+      </Step>
+      
+      <Step title="Exclude large generated files">
+        Generated code often doesn't need obfuscation:
+        ```yaml
+        refractor:
+          exclude:
+            - "**/*.g.dart"
+            - "**/*.freezed.dart"
+            - "**/generated/**"
+        ```
+      </Step>
+    </Steps>
+  </Accordion>
+  
+  <Accordion title="Large output file size">
+    **Issue:**
+    Obfuscated executable is much larger than expected.
+    
+    **Cause:**
+    Dead code injection adds extra bytecode, or you're using the `exe` target.
+    
+    **Solution:**
+    
+    <Steps>
+      <Step title="Use a smaller target format">
+        Switch from `exe` to `aot` or `jit`:
+        ```bash
+        refractor build --target aot
+        ```
+        
+        See [Build Targets](/guides/build-targets) for size comparison.
+      </Step>
+      
+      <Step title="Reduce dead code insertions">
+        Lower the insertion rate:
+        ```yaml
+        passes:
+          dead_code:
+            max_insertions_per_procedure: 1
+        ```
+      </Step>
+      
+      <Step title="Strip debug symbols (for exe)">
+        On Linux/macOS, strip the binary:
+        ```bash
+        strip build/app
+        ```
+      </Step>
+    </Steps>
+  </Accordion>
+  
+  <Accordion title="Runtime performance degradation">
+    **Issue:**
+    Obfuscated app runs slower than the original.
+    
+    **Cause:**
+    String encryption adds XOR decoding overhead, and dead code may impact branch prediction.
+    
+    **Solution:**
+    
+    <Steps>
+      <Step title="Use AOT target for best performance">
+        AOT compilation produces the fastest code:
+        ```bash
+        refractor build --target aot
+        ```
+      </Step>
+      
+      <Step title="Benchmark with and without string encryption">
+        Disable string encryption and measure:
+        ```yaml
+        passes:
+          rename: true
+          string_encrypt: false
+          dead_code: true
+        ```
+      </Step>
+      
+      <Step title="Profile the application">
+        Use Dart's profiling tools to identify bottlenecks:
+        ```bash
+        dart run --observe build/app.jit
+        ```
+        
+        Then connect to Observatory to profile.
+      </Step>
+    </Steps>
+  </Accordion>
+</AccordionGroup>
+
+## Exception Types Reference
+
+Refractor defines specific exception types with appropriate exit codes:
+
+| Exception | Exit Code | Common Causes |
+|-----------|-----------|---------------|
+| `ConfigException` | `ExitCode.config.code` | Missing/invalid config file, YAML errors |
+| `BuildException` | `ExitCode.software.code` | Invalid target, orchestration errors |
+| `CompilationException` | `ExitCode.software.code` | Dart compilation failures |
+| `ProcessRunException` | `ExitCode.software.code` | Process execution failures |
+| `FileIoException` | `ExitCode.ioError.code` | Missing files, inaccessible directories |
+
+Source: `lib/src/exceptions/refractor_exception.dart:7-69`
+
+## Debugging Tips
+
+<CardGroup cols={2}>
+  <Card title="Use --verbose flag" icon="terminal">
+    Get detailed output for each build step:
+    ```bash
+    refractor build --verbose
+    ```
+  </Card>
+  
+  <Card title="Inspect kernel output" icon="magnifying-glass">
+    Examine obfuscated bytecode:
+    ```bash
+    refractor inspect build/app.dill
+    ```
+  </Card>
+  
+  <Card title="Build incrementally" icon="layer-group">
+    Enable passes one at a time to isolate issues:
+    ```yaml
+    passes:
+      rename: true
+      string_encrypt: false
+      dead_code: false
+    ```
+  </Card>
+  
+  <Card title="Compare outputs" icon="code-compare">
+    Build with and without obfuscation and diff the results:
+    ```bash
+    dart compile exe lib/main.dart -o build/plain
+    refractor build --target exe
+    ```
+  </Card>
+</CardGroup>
+
+## Getting Help
+
+If you encounter an issue not covered here:
+
+1. **Check the logs** - Use `--verbose` to get detailed output
+2. **Verify your configuration** - Ensure `refractor.yaml` is valid
+3. **Test without obfuscation** - Confirm your code compiles normally with `dart compile`
+4. **Report the issue** - Open an issue at [github.com/yardexx/refractor](https://github.com/yardexx/refractor)
+
+<Info>
+When reporting issues, include:
+- Refractor version
+- Full error message
+- `refractor.yaml` configuration
+- Minimal reproduction steps
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Build Targets" icon="bullseye" href="/guides/build-targets">
+    Choose the right output format
+  </Card>
+  <Card title="Debugging" icon="bug" href="/guides/debugging-obfuscated-code">
+    Deobfuscate stack traces with symbol maps
+  </Card>
+</CardGroup>

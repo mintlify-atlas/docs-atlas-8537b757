@@ -1,0 +1,582 @@
+---
+title: "Dead Code Injection"
+description: "Insert unreachable branches to hinder static analysis and decompilers"
+---
+
+## Overview
+
+The **Dead Code Injection Pass** inserts unreachable `if (false) { ... }` branches throughout your procedure bodies. These branches contain dummy operations that decompilers must analyze, making reverse engineering slower and more confusing.
+
+<Info>
+Dead code has **zero runtime cost** — the Dart VM optimizer eliminates `if (false)` branches during JIT/AOT compilation.
+</Info>
+
+## How It Works
+
+The pass walks all procedures and injects dummy conditional branches (lib/src/engine/passes/dead_code/dead_code_pass.dart:12):
+
+<Steps>
+  <Step title="Find Target Procedures">
+    Walk the kernel Component and identify all procedures with non-empty block bodies.
+  </Step>
+  
+  <Step title="Inject Dead Branches">
+    For each procedure, insert up to `max_insertions_per_procedure` dummy `if (false)` branches before existing statements.
+  </Step>
+  
+  <Step title="Generate Dummy Code">
+    Each dead branch contains simple operations like variable declarations and assignments that look realistic but never execute.
+  </Step>
+</Steps>
+
+### Why Dead Code?
+
+Decompilers and static analyzers must process **all branches**, even unreachable ones:
+
+- **Control flow analysis**: Must track all possible execution paths
+- **Data flow analysis**: Must analyze variable usage in dead branches
+- **Type inference**: Must verify type correctness of dead code
+
+This increases analysis time and clutters decompiler output, making manual review harder.
+
+## Configuration
+
+### Enable with Defaults
+
+```yaml
+passes:
+  dead_code: true  # Inserts up to 1 branch per procedure
+```
+
+### Full Configuration
+
+```yaml
+passes:
+  dead_code:
+    max_insertions_per_procedure: 2  # Insert up to 2 dead branches per procedure
+```
+
+<Accordion title="max_insertions_per_procedure">
+  **Type**: `int`  
+  **Default**: `1`
+  
+  Maximum number of dead branches to insert per procedure. Higher values increase obfuscation strength but also binary size.
+  
+  **Recommended values**:
+  - `1-2`: Balanced (moderate obfuscation, small size increase)
+  - `3-5`: Strong (significant obfuscation, noticeable size increase)
+  - `6+`: Extreme (very strong obfuscation, large binaries)
+  
+  ```yaml
+  dead_code:
+    max_insertions_per_procedure: 3  # Insert up to 3 branches
+  ```
+</Accordion>
+
+## What Gets Injected
+
+The pass injects branches before each existing statement in a procedure body (lib/src/engine/passes/dead_code/dead_code_transformer.dart:14).
+
+### Injection Pattern
+
+**Before:**
+```dart
+void calculate() {
+  var x = 10;
+  var y = 20;
+  print(x + y);
+}
+```
+
+**After** (with `max_insertions_per_procedure: 2`):
+```dart
+void calculate() {
+  if (false) { var _d = 0; _d = 1; }  // Dead branch 1
+  var x = 10;
+  
+  if (false) { var _d = 0; _d = 1; }  // Dead branch 2
+  var y = 20;
+  
+  print(x + y);
+}
+```
+
+Each dead branch contains:
+1. A dummy variable declaration: `var _d = 0`
+2. A dummy assignment: `_d = 1`
+
+<Note>
+The assignment is pointless (assigning to a local variable that's never read), but decompilers must analyze it anyway.
+</Note>
+
+## Dead Branch Structure
+
+Each injected branch follows this pattern (lib/src/engine/passes/dead_code/dead_code_transformer.dart:56):
+
+```dart
+if (false) {
+  var _d = 0;
+  _d = 1;
+}
+```
+
+In kernel AST representation:
+
+```dart
+IfStatement(
+  BoolLiteral(false),            // Condition: always false
+  Block([                        // Then branch
+    VariableDeclaration('_d', initializer: IntLiteral(0)),
+    ExpressionStatement(
+      VariableSet(_d, IntLiteral(1)),
+    ),
+  ]),
+  null,                          // No else branch
+)
+```
+
+### Why This Pattern?
+
+<Accordion title="Simple but effective">
+  The pattern is trivial for the VM optimizer to eliminate but forces decompilers to:
+  - Track the `_d` variable's scope
+  - Analyze the assignment's data flow
+  - Verify type correctness
+</Accordion>
+
+<Accordion title="Doesn't interfere with real code">
+  The dummy variable `_d` is local to the dead branch, so it never conflicts with your actual variables.
+</Accordion>
+
+<Accordion title="Looks realistic in decompiler output">
+  Decompilers show:
+  ```dart
+  if (false) {
+    var _d = 0;
+    _d = 1;
+  }
+  ```
+  
+  This looks like leftover debug code or dead variable initialization, not obvious obfuscation.
+</Accordion>
+
+## Before and After Examples
+
+### Example 1: Simple Function
+
+**Before:**
+```dart
+void greet(String name) {
+  print("Hello, $name!");
+}
+```
+
+**After** (with `max_insertions_per_procedure: 1`):
+```dart
+void greet(String name) {
+  if (false) { var _d = 0; _d = 1; }
+  print("Hello, $name!");
+}
+```
+
+### Example 2: Multi-Statement Function
+
+**Before:**
+```dart
+int calculateTotal(List<int> items) {
+  var total = 0;
+  for (var item in items) {
+    total += item;
+  }
+  return total;
+}
+```
+
+**After** (with `max_insertions_per_procedure: 2`):
+```dart
+int calculateTotal(List<int> items) {
+  if (false) { var _d = 0; _d = 1; }  // Inserted before first statement
+  var total = 0;
+  
+  if (false) { var _d = 0; _d = 1; }  // Inserted before second statement
+  for (var item in items) {
+    total += item;
+  }
+  
+  return total;  // No insertion after last statement
+}
+```
+
+<Note>
+Insertions stop after `max_insertions_per_procedure` is reached, even if more statements remain.
+</Note>
+
+### Example 3: Empty Function (Skipped)
+
+**Before:**
+```dart
+void noop() {}  // Empty body
+
+void noop2() => print('hi');  // Expression body, not a block
+```
+
+**After:**
+```dart
+void noop() {}  // Skipped (empty)
+
+void noop2() => print('hi');  // Skipped (not a block body)
+```
+
+The pass only injects into **non-empty block bodies** (lib/src/engine/passes/dead_code/dead_code_transformer.dart:44):
+
+```dart
+bool _isFunctionEmpty(Procedure node) {
+  final body = node.function.body;
+  return body is! Block || body.statements.isEmpty;
+}
+```
+
+## Implementation Details
+
+### Transformer Logic
+
+The `DeadCodeTransformer` extends `PassTransformer` and overrides `visitProcedure` (lib/src/engine/passes/dead_code/dead_code_transformer.dart:15):
+
+```dart
+class DeadCodeTransformer extends PassTransformer {
+  @override
+  TreeNode visitProcedure(Procedure node) {
+    if (_isFunctionEmpty(node)) return super.visitProcedure(node);
+    
+    final body = node.function.body;
+    if (body is! Block) return super.visitProcedure(node);
+    
+    final newStatements = <Statement>[];
+    var insertions = 0;
+    
+    for (final statement in body.statements) {
+      if (insertions < maxInsertions) {
+        newStatements.add(_buildDeadBranch());
+        insertions++;
+      }
+      newStatements.add(statement);
+    }
+    
+    if (insertions > 0) {
+      node.function.body = Block(newStatements)..parent = node.function;
+    }
+    
+    return super.visitProcedure(node);
+  }
+}
+```
+
+**Key points**:
+- Iterates through existing statements
+- Inserts a dead branch **before** each statement (up to the limit)
+- Replaces the procedure body with the new statement list
+- Sets the parent correctly for kernel AST consistency
+
+### Building Dead Branches
+
+The `_buildDeadBranch()` method constructs the kernel AST (lib/src/engine/passes/dead_code/dead_code_transformer.dart:56):
+
+```dart
+Statement _buildDeadBranch() {
+  final intType = InterfaceType(intClass, Nullability.nullable);
+  
+  // var _d = 0;
+  final dummy = VariableDeclaration(
+    '_d',
+    initializer: IntLiteral(0),
+    type: intType,
+  );
+  
+  // _d = 1;
+  final dummyAssignment = ExpressionStatement(
+    VariableSet(dummy, IntLiteral(1)),
+  );
+  
+  // if (false) { ... }
+  final dummyIf = IfStatement(
+    BoolLiteral(false),
+    Block([dummy, dummyAssignment]),
+    null,
+  );
+  
+  return dummyIf;
+}
+```
+
+<Info>
+The entire branch is built using kernel AST nodes, not source strings. This ensures type correctness and VM compatibility.
+</Info>
+
+## Performance Considerations
+
+### Runtime Cost
+
+**Zero cost**. The Dart VM optimizer eliminates `if (false)` branches during compilation:
+
+```dart
+if (false) { var _d = 0; _d = 1; }  // Eliminated during optimization
+print("Hello");                      // Executed normally
+```
+
+Both JIT and AOT compilers recognize constant `false` conditions and remove the entire branch from the generated machine code.
+
+<Note>
+The VM optimizer runs **after** obfuscation, so dead branches never impact runtime performance.
+</Note>
+
+### Binary Size Impact
+
+**Increases binary size** because dead branches are preserved in the `.dill` file:
+
+- **1 insertion per procedure**: +0.5% to +2% binary size
+- **2 insertions per procedure**: +1% to +4%
+- **5 insertions per procedure**: +3% to +10%
+
+The exact impact depends on:
+- Number of procedures in your code
+- Average statements per procedure
+- `max_insertions_per_procedure` setting
+
+<Tip>
+Balance obfuscation strength vs. binary size:
+
+```yaml
+# Lightweight (recommended for most apps)
+dead_code:
+  max_insertions_per_procedure: 1
+
+# Aggressive (for high-security apps)
+dead_code:
+  max_insertions_per_procedure: 3
+```
+</Tip>
+
+### Decompilation Impact
+
+Dead branches significantly increase decompiler output complexity:
+
+**Without dead code:**
+```dart
+void processUser(int id) {
+  var user = fetchUser(id);
+  validateUser(user);
+  saveUser(user);
+}
+```
+
+Decompiler output is clean and easy to understand.
+
+**With dead code** (`max_insertions_per_procedure: 2`):
+```dart
+void processUser(int id) {
+  if (false) { var _d = 0; _d = 1; }
+  var user = fetchUser(id);
+  if (false) { var _d = 0; _d = 1; }
+  validateUser(user);
+  saveUser(user);
+}
+```
+
+Decompiler output is cluttered with dummy branches. Reverse engineers must:
+1. Identify which branches are dead
+2. Manually remove them to understand logic
+3. Deal with broken control flow graphs
+
+<Warning>
+Experienced reverse engineers can identify the pattern and remove dead branches with scripts. Dead code injection is a **deterrent**, not an absolute defense.
+</Warning>
+
+## Advanced Patterns
+
+### Combining with Rename
+
+Run Rename before Dead Code to obfuscate the dummy variable name:
+
+```yaml
+passes:
+  rename: true       # Runs first
+  dead_code: true    # Dummy variable _d might get renamed
+```
+
+**Result:**
+```dart
+if (false) { var _$0 = 0; _$0 = 1; }  // Obfuscated dummy variable
+```
+
+<Note>
+In practice, the dummy variable `_d` is local to each dead branch, so renaming has minimal impact. The variable name is less important than the branch's existence.
+</Note>
+
+### Randomizing Insertions (Future Enhancement)
+
+Currently, dead branches are inserted **before** each statement in order. A future enhancement could:
+
+- Insert at random positions (before, after, or between statements)
+- Vary the dummy code pattern (different operations, multiple variables)
+- Use different condition patterns (`if (1 == 2)`, `if (null != null)`)
+
+This would make the obfuscation pattern less predictable.
+
+### Nested Dead Branches (Not Implemented)
+
+Another potential enhancement:
+
+```dart
+if (false) {
+  if (false) {
+    var _d = 0;
+    _d = 1;
+  }
+}
+```
+
+Nested branches further complicate control flow analysis.
+
+## Limitations
+
+### Binary Size Growth
+
+High `max_insertions_per_procedure` values can significantly increase binary size:
+
+```yaml
+dead_code:
+  max_insertions_per_procedure: 10  # May add 10-20% to binary size
+```
+
+**Mitigation**: Use lower values (1-3) for most apps.
+
+### Pattern Recognition
+
+The current implementation uses a single pattern:
+
+```dart
+if (false) { var _d = 0; _d = 1; }
+```
+
+Reverse engineers can write scripts to identify and remove this pattern:
+
+```python
+# Pseudocode: remove dead branches
+for branch in ast.if_statements:
+    if branch.condition == BoolLiteral(false):
+        remove(branch)
+```
+
+**Mitigation**: Future versions could randomize patterns.
+
+### Expression Bodies
+
+Dead code cannot be injected into expression bodies:
+
+```dart
+void foo() => print('hi');  // Cannot inject into expression body
+```
+
+The pass only works with **block bodies** (`{ ... }`).
+
+**Workaround**: The Dart compiler often converts expression bodies to blocks during kernel compilation, so this limitation rarely matters in practice.
+
+## Best Practices
+
+### Start Conservative
+
+Begin with `max_insertions_per_procedure: 1` and increase if needed:
+
+```yaml
+dead_code:
+  max_insertions_per_procedure: 1  # Start here
+```
+
+Measure binary size impact before increasing.
+
+### Combine with Other Passes
+
+Dead Code Injection is most effective when combined with Rename and String Encryption:
+
+```yaml
+passes:
+  rename: true              # Obfuscate identifiers
+  string_encrypt: true      # Hide string literals
+  dead_code:                # Clutter control flow
+    max_insertions_per_procedure: 2
+```
+
+This creates multiple layers of obfuscation.
+
+### Profile Binary Size
+
+Always check the impact on your app's binary:
+
+```bash
+# Build without dead code
+refractor build --output build_no_dead
+
+# Build with dead code
+refractor build --output build_with_dead
+
+# Compare sizes
+du -sh build_no_dead/app.exe build_with_dead/app.exe
+```
+
+### Monitor Decompiler Output
+
+Test your obfuscation by decompiling your own binary:
+
+```bash
+# Decompile with your preferred tool
+decompiler build/app.exe > decompiled.dart
+
+# Check for dead branches
+grep 'if (false)' decompiled.dart
+```
+
+Ensure dead branches appear in the output.
+
+## Troubleshooting
+
+<Accordion title="Binary size increased dramatically">
+  Reduce `max_insertions_per_procedure`:
+  
+  ```yaml
+  dead_code:
+    max_insertions_per_procedure: 1  # Lower value
+  ```
+</Accordion>
+
+<Accordion title="Dead branches don't appear in decompiler output">
+  Some decompilers perform dead code elimination. Try a different decompiler or check the raw `.dill` file with `refractor inspect`:
+  
+  ```bash
+  refractor inspect build/app.dill | grep 'if (false)'
+  ```
+</Accordion>
+
+<Accordion title="Compilation fails after enabling dead_code">
+  This should never happen — dead branches are syntactically valid. File a bug report with your configuration and code sample.
+</Accordion>
+
+<Accordion title="Some functions have no dead branches">
+  The pass skips:
+  - Empty functions
+  - Expression body functions (`=>` syntax)
+  - Functions in libraries outside obfuscation scope
+  
+  Check that your functions have block bodies and are in user libraries.
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Rename Pass" icon="signature" href="/obfuscation/rename-pass">
+    Learn about identifier obfuscation
+  </Card>
+  
+  <Card title="String Encryption" icon="lock" href="/obfuscation/string-encryption">
+    Hide string literals with XOR encoding
+  </Card>
+</CardGroup>

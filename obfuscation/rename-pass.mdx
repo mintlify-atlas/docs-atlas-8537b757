@@ -1,0 +1,380 @@
+---
+title: "Rename Pass"
+description: "Rewrite class, method, and field identifiers to short meaningless names"
+---
+
+## Overview
+
+The **Rename Pass** is Refractor's identifier obfuscation system. It rewrites user-defined names (classes, methods, fields, variables) to short, meaningless identifiers like `_$0`, `_$1`, `_$2`.
+
+<Info>
+Rename runs first in the pass pipeline so other passes operate on already-obfuscated identifiers.
+</Info>
+
+## How It Works
+
+The Rename Pass uses a **three-phase approach** (lib/src/engine/passes/rename/rename_pass.dart:16):
+
+<Steps>
+  <Step title="Phase 1: Collection">
+    Walk the entire kernel Component using `RenameVisitor` to collect all renameable declarations (classes, methods, fields). Assign each a new obfuscated name from the `NameGenerator`.
+  </Step>
+  
+  <Step title="Phase 2: Application">
+    Apply all renames using `RenameTransformer`. This updates both the declarations and all references throughout the codebase in a single traversal.
+  </Step>
+  
+  <Step title="Phase 3: Canonical Name Cleanup">
+    Unbind canonical names for renamed libraries so the Dart kernel BinaryPrinter can recompute them correctly. This prevents conflicts between old and new names.
+  </Step>
+</Steps>
+
+### Why Three Phases?
+
+This design prevents reference errors:
+
+1. Collecting all renames first ensures no collisions
+2. Using identity-based maps (not string-based) means lookups work even after mutation
+3. Unbinding canonical names ensures the serialized `.dill` file has correct metadata
+
+## Configuration
+
+### Enable with Defaults
+
+```yaml
+passes:
+  rename: true
+```
+
+### Full Configuration
+
+```yaml
+passes:
+  rename:
+    preserve_main: true  # Don't rename 'main' function (default: true)
+```
+
+<Warning>
+Setting `preserve_main: false` will rename your entry point function. The Dart VM expects a function named `main`, so your app won't run.
+</Warning>
+
+## What Gets Renamed
+
+The pass renames:
+
+- **Classes**: `UserProfile` → `_$0`
+- **Methods**: `calculateTotal()` → `_$1()`
+- **Fields**: `userName` → `_$2`
+- **Top-level functions**: `validateEmail()` → `_$3()`
+- **Getters and setters**: `get fullName` → `get _$4`
+
+### What Gets Skipped
+
+<Accordion title="Dart SDK Libraries">
+  All `dart:*` libraries are skipped automatically. `dart:core`, `dart:io`, `dart:async`, etc. remain unchanged.
+</Accordion>
+
+<Accordion title="External Dependencies">
+  Package dependencies from pub.dev are not obfuscated. Only your project code (matching `pubspec.yaml` name and working directory) is in scope.
+</Accordion>
+
+<Accordion title="Excluded Files">
+  Files matching patterns in the `refractor.exclude` list are skipped:
+  
+  ```yaml
+  refractor:
+    exclude:
+      - "**/*.g.dart"
+      - "**/*.freezed.dart"
+  ```
+</Accordion>
+
+<Accordion title="Pragma Annotations">
+  Declarations with `pragma` annotations are preserved (lib/src/engine/passes/rename/rename_visitor.dart:80):
+  
+  ```dart
+  @pragma('vm:entry-point')
+  class NativeBindings {} // Not renamed
+  ```
+</Accordion>
+
+<Accordion title="Main Function (Optional)">
+  By default, the `main` function is preserved. Set `preserve_main: false` to rename it (not recommended).
+</Accordion>
+
+## Name Generation
+
+Obfuscated names follow the pattern `_$0`, `_$1`, `_$2`, ... generated sequentially by the `NameGenerator`.
+
+### Deduplication
+
+The pass deduplicates names within the same library (lib/src/engine/passes/rename/rename_visitor.dart:15):
+
+```dart
+class User {
+  String name;        // → _$0
+  String get name {}  // → _$0 (reuses same obfuscated name)
+}
+```
+
+This ensures getters/setters and their backing fields share the same obfuscated name.
+
+### Private Names
+
+Dart private names (starting with `_`) remain private but get obfuscated:
+
+```dart
+String _privateField;  // → _$0 (still private to library)
+String publicField;    // → _$1
+```
+
+## Before and After Examples
+
+### Example 1: Simple Class
+
+**Before:**
+```dart
+class ShoppingCart {
+  List<String> items = [];
+  
+  void addItem(String item) {
+    items.add(item);
+  }
+  
+  int get itemCount => items.length;
+}
+```
+
+**After:**
+```dart
+class _$0 {
+  List<String> _$1 = [];
+  
+  void _$2(String _$3) {
+    _$1.add(_$3);
+  }
+  
+  int get _$4 => _$1.length;
+}
+```
+
+### Example 2: Inheritance
+
+**Before:**
+```dart
+abstract class Animal {
+  String makeSound();
+}
+
+class Dog extends Animal {
+  @override
+  String makeSound() => "Woof";
+}
+```
+
+**After:**
+```dart
+abstract class _$0 {
+  String _$1();
+}
+
+class _$2 extends _$0 {
+  @override
+  String _$1() => "Woof"; // Preserves override relationship
+}
+```
+
+<Info>
+The pass correctly handles inheritance — overridden methods keep the same obfuscated name as their parent declaration.
+</Info>
+
+### Example 3: Preserved Main
+
+**Before:**
+```dart
+void main() {
+  runApp();
+}
+
+void runApp() {
+  print("Hello");
+}
+```
+
+**After:**
+```dart
+void main() {  // Preserved with preserve_main: true
+  _$0();
+}
+
+void _$0() {
+  print("Hello");
+}
+```
+
+## Implementation Details
+
+### Collection Phase
+
+The `RenameVisitor` extends `RecursiveVisitor` to walk the kernel AST (lib/src/engine/passes/rename/rename_visitor.dart:4):
+
+```dart
+class RenameVisitor extends PassVisitor {
+  final Map<Class, String> classRenames = {};
+  final Map<Member, Name> memberRenames = {};
+  
+  @override
+  void visitClass(Class node) {
+    if (_shouldRename(node.name)) {
+      final obf = context.nameGenerator.next();
+      context.symbolTable.record(node.name, obf);
+      classRenames[node] = obf;
+    }
+    super.visitClass(node);
+  }
+}
+```
+
+Key points:
+- Uses **identity-based maps** (`Map<Class, String>`) so lookups work after mutation
+- Records mappings in `SymbolTable` for the symbol map output
+- Checks `_hasEntryPointPragma()` to skip `@pragma` annotated declarations
+
+### Application Phase
+
+The `RenameTransformer` extends `Transformer` to mutate the AST:
+
+```dart
+class RenameTransformer extends PassTransformer {
+  @override
+  TreeNode visitClass(Class node) {
+    if (classRenames.containsKey(node)) {
+      node.name = classRenames[node]!; // Mutate the name
+    }
+    return super.visitClass(node);
+  }
+}
+```
+
+This updates:
+- Declaration names (`class Foo` → `class _$0`)
+- All references (`new Foo()` → `new _$0()`)
+- Type annotations (`Foo bar` → `_$0 bar`)
+
+### Canonical Name Cleanup
+
+The final phase unbinds canonical names (lib/src/engine/passes/rename/rename_pass.dart:40):
+
+```dart
+for (final lib in component.libraries) {
+  if (context.shouldObfuscateLibrary(lib)) {
+    lib.reference.canonicalName?.unbindAll();
+  }
+}
+```
+
+<Note>
+Canonical names are Dart kernel's internal naming system. Unbinding them after renaming ensures the BinaryPrinter recomputes them correctly when writing the `.dill` file.
+</Note>
+
+## Symbol Map Output
+
+When `refractor.symbol_map` is configured, the Rename Pass records all mappings:
+
+```json
+{
+  "ShoppingCart": "_$0",
+  "items": "_$1",
+  "addItem": "_$2",
+  "item": "_$3",
+  "itemCount": "_$4"
+}
+```
+
+Use this for:
+- **Debugging**: Map obfuscated crash stack traces back to original names
+- **Auditing**: Verify which identifiers were renamed
+- **Reversing**: Understand decompiled code during security reviews
+
+<Warning>
+Never ship the symbol map with your application — it completely negates the obfuscation.
+</Warning>
+
+## Performance Impact
+
+**Runtime**: Zero cost. Renaming only changes identifiers; the compiled code is functionally identical.
+
+**Binary Size**: Reduces size by 1-5%. Shorter identifiers mean less metadata in the `.dill` file.
+
+## Limitations
+
+### Reflection
+
+Dart reflection (mirrors) breaks with identifier obfuscation:
+
+```dart
+import 'dart:mirrors';
+
+void inspect(Object obj) {
+  reflect(obj).type.declarations.forEach((name, decl) {
+    print(name); // Prints obfuscated names like "_$0"
+  });
+}
+```
+
+<Tip>
+If your code uses mirrors, exclude those files from obfuscation or use pragma annotations to preserve specific declarations.
+</Tip>
+
+### FFI and Native Bindings
+
+Native code expects specific function names. Always use `@pragma('vm:entry-point')` for FFI:
+
+```dart
+@pragma('vm:entry-point')
+class NativeBindings {
+  @pragma('vm:entry-point')
+  static void nativeCallback() {} // Preserved for native code
+}
+```
+
+### JSON Serialization
+
+JSON serialization libraries like `json_serializable` generate code that references field names:
+
+```dart
+Map<String, dynamic> toJson() => {
+  'userName': userName, // Field name as string literal
+};
+```
+
+After renaming:
+```dart
+Map<String, dynamic> toJson() => {
+  'userName': _$0, // Field renamed but key unchanged
+};
+```
+
+This is usually fine — the JSON keys stay the same. But be aware that decompilers can correlate field names with JSON keys.
+
+<Tip>
+Exclude generated `*.g.dart` files to prevent confusion:
+
+```yaml
+refractor:
+  exclude:
+    - "**/*.g.dart"
+```
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="String Encryption" icon="lock" href="/obfuscation/string-encryption">
+    Hide string literals with XOR encryption
+  </Card>
+  
+  <Card title="Dead Code Injection" icon="code-branch" href="/obfuscation/dead-code">
+    Insert unreachable branches to confuse decompilers
+  </Card>
+</CardGroup>

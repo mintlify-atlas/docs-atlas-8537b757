@@ -1,0 +1,370 @@
+---
+title: 'Debugging Obfuscated Code'
+description: 'Using symbol maps to debug and deobfuscate stack traces'
+---
+
+Obfuscation makes your code harder to reverse engineer, but it also makes debugging more challenging. Refractor generates a **symbol map** that maps obfuscated names back to their originals, allowing you to deobfuscate stack traces and debug issues in production.
+
+## Symbol Maps
+
+The `SymbolTable` class tracks all identifier renames during obfuscation:
+
+```dart
+class SymbolTable {
+  // obfuscated -> original
+  final Map<String, String> _map = {};
+
+  void record(String original, String obfuscated) {
+    _map[obfuscated] = original;
+  }
+
+  String? original(String obfuscated) => _map[obfuscated];
+}
+```
+
+Source: `lib/src/engine/symbol_table.dart:10-20`
+
+## Enabling Symbol Map Output
+
+Configure the symbol map path in `refractor.yaml`:
+
+```yaml
+refractor:
+  symbol_map: symbol_map.json
+  exclude:
+    - "**/*.g.dart"
+  verbose: false
+
+passes:
+  rename:
+    preserve_main: true
+```
+
+The symbol map is written after every build:
+
+```dart
+final result = BuildResult(
+  outputPath: request.output,
+  symbolTable: symbolTable,
+  passesRun: enabledPasses.map((p) => p.name).toList(),
+);
+```
+
+Source: `lib/src/engine/engine.dart:78-82`
+
+## Symbol Map Format
+
+The symbol map is exported as a JSON file mapping obfuscated names to originals:
+
+```json
+{
+  "a": "UserRepository",
+  "b": "AuthService",
+  "c": "DatabaseConnection",
+  "d": "fetchUserById",
+  "e": "validateCredentials",
+  "f": "_privateHelper"
+}
+```
+
+The format is:
+```dart
+Map<String, String> toJson() => Map.unmodifiable(_map);
+String toJsonString() => const JsonEncoder.withIndent('  ').convert(_map);
+```
+
+Source: `lib/src/engine/symbol_table.dart:37-40`
+
+## Deobfuscating Stack Traces
+
+<Steps>
+  <Step title="Capture Obfuscated Stack Trace">
+    When your obfuscated application crashes, you'll see obfuscated names:
+    
+    ```
+    Unhandled exception:
+    #0      a.d (package:myapp/a.dart:42)
+    #1      b.e (package:myapp/b.dart:17)
+    #2      c.f (package:myapp/c.dart:89)
+    ```
+  </Step>
+  
+  <Step title="Load the Symbol Map">
+    Read the generated `symbol_map.json`:
+    
+    ```dart
+    import 'dart:convert';
+    import 'dart:io';
+    
+    final symbolMap = json.decode(
+      File('symbol_map.json').readAsStringSync(),
+    ) as Map<String, dynamic>;
+    ```
+  </Step>
+  
+  <Step title="Replace Obfuscated Names">
+    Map each obfuscated identifier back to its original:
+    
+    ```dart
+    String deobfuscate(String obfuscatedTrace, Map<String, String> symbolMap) {
+      var result = obfuscatedTrace;
+      symbolMap.forEach((obfuscated, original) {
+        result = result.replaceAll(obfuscated, original);
+      });
+      return result;
+    }
+    ```
+  </Step>
+  
+  <Step title="Review Deobfuscated Trace">
+    The readable stack trace shows original names:
+    
+    ```
+    Unhandled exception:
+    #0      UserRepository.fetchUserById (package:myapp/repositories/user.dart:42)
+    #1      AuthService.validateCredentials (package:myapp/services/auth.dart:17)
+    #2      DatabaseConnection._executeQuery (package:myapp/db/connection.dart:89)
+    ```
+  </Step>
+</Steps>
+
+## Symbol Map Lookup Methods
+
+The `SymbolTable` provides bidirectional lookup:
+
+### Original from Obfuscated
+
+```dart
+String? original(String obfuscated) => _map[obfuscated];
+```
+
+**Usage:**
+```dart
+final original = symbolTable.original('a'); // "UserRepository"
+```
+
+### Obfuscated from Original (Reverse Lookup)
+
+```dart
+String? obfuscated(String original) {
+  for (final entry in _map.entries) {
+    if (entry.value == original) return entry.key;
+  }
+  return null;
+}
+```
+
+**Usage:**
+```dart
+final obfuscated = symbolTable.obfuscated('UserRepository'); // "a"
+```
+
+Source: `lib/src/engine/symbol_table.dart:19-28`
+
+## Development vs Production Builds
+
+<Tabs>
+  <Tab title="Development">
+    For development builds, consider **disabling obfuscation** entirely or using minimal passes:
+    
+    ```yaml
+    # refractor.dev.yaml
+    refractor:
+      symbol_map: dev_symbols.json
+      verbose: true
+    
+    passes:
+      rename: false
+      string_encrypt: false
+      dead_code: false
+    ```
+    
+    Build with:
+    ```bash
+    refractor build --config refractor.dev.yaml
+    ```
+    
+    <Info>
+    With all passes disabled, the output is functionally equivalent to a standard `dart compile`, making debugging trivial.
+    </Info>
+  </Tab>
+  
+  <Tab title="Production">
+    For production, enable all passes and **secure the symbol map**:
+    
+    ```yaml
+    # refractor.yaml
+    refractor:
+      symbol_map: build/symbol_map.json
+      verbose: false
+    
+    passes:
+      rename:
+        preserve_main: true
+      string_encrypt:
+        xor_key: 0x5A
+      dead_code:
+        max_insertions_per_procedure: 2
+    ```
+    
+    <Warning>
+    **Never deploy the symbol map with your application.** It defeats the purpose of obfuscation. Store it securely for post-mortem debugging.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Securing Symbol Maps
+
+<CardGroup cols={2}>
+  <Card title="Store Separately" icon="database">
+    Keep symbol maps in a secure location separate from deployed artifacts.
+  </Card>
+  <Card title="Version Control" icon="code-branch">
+    Git-ignore symbol maps or store in a private repository with restricted access.
+  </Card>
+  <Card title="Build Metadata" icon="tag">
+    Tag symbol maps with build version, commit hash, and timestamp for traceability.
+  </Card>
+  <Card title="Access Control" icon="lock">
+    Limit symbol map access to authorized developers and incident response teams.
+  </Card>
+</CardGroup>
+
+### Recommended `.gitignore`
+
+```bash
+# Ignore symbol maps to prevent accidental commits
+symbol_map.json
+build/symbol_map.json
+*.symbols.json
+
+# Ignore build artifacts
+build/
+*.dill
+*.aot
+*.jit
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Preserve main function">
+    Always use `preserve_main: true` in the rename pass to keep your entrypoint discoverable:
+    
+    ```yaml
+    passes:
+      rename:
+        preserve_main: true
+    ```
+    
+    This prevents the `main()` function from being renamed, allowing the Dart VM to find it.
+  </Accordion>
+  
+  <Accordion title="Archive symbol maps per release">
+    Store symbol maps alongside release artifacts:
+    
+    ```
+    releases/
+      v1.0.0/
+        app.exe
+        symbol_map.json
+        build_info.txt
+      v1.0.1/
+        app.exe
+        symbol_map.json
+        build_info.txt
+    ```
+    
+    This ensures you can debug any version in production.
+  </Accordion>
+  
+  <Accordion title="Automate deobfuscation">
+    Build a tool or script to automatically deobfuscate incoming crash reports:
+    
+    ```dart
+    void main(List<String> args) {
+      final trace = File(args[0]).readAsStringSync();
+      final symbolMap = json.decode(File('symbol_map.json').readAsStringSync());
+      
+      final deobfuscated = deobfuscate(trace, symbolMap);
+      print(deobfuscated);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Test with realistic scenarios">
+    Before deploying, intentionally trigger errors in an obfuscated build and verify you can successfully deobfuscate the traces.
+  </Accordion>
+</AccordionGroup>
+
+## Symbol Table Statistics
+
+The symbol table tracks the total number of renames:
+
+```dart
+int get size => _map.length;
+```
+
+You can log this during the build to understand obfuscation coverage:
+
+```dart
+final symbolTable = result.symbolTable;
+print('Obfuscated ${symbolTable.size} identifiers');
+```
+
+Source: `lib/src/engine/symbol_table.dart:42`
+
+<Tip>
+A higher symbol count generally indicates more thorough obfuscation, but also means more entries to manage in your symbol map.
+</Tip>
+
+## Example: Deobfuscation Script
+
+Here's a complete script for deobfuscating stack traces:
+
+```dart
+import 'dart:convert';
+import 'dart:io';
+
+void main(List<String> args) {
+  if (args.length != 2) {
+    print('Usage: dart deobfuscate.dart <trace_file> <symbol_map>');
+    exit(1);
+  }
+
+  final traceFile = File(args[0]);
+  final symbolMapFile = File(args[1]);
+
+  if (!traceFile.existsSync() || !symbolMapFile.existsSync()) {
+    print('Error: File not found');
+    exit(1);
+  }
+
+  final trace = traceFile.readAsStringSync();
+  final symbolMap = json.decode(symbolMapFile.readAsStringSync()) 
+      as Map<String, dynamic>;
+
+  var deobfuscated = trace;
+  symbolMap.forEach((obfuscated, original) {
+    deobfuscated = deobfuscated.replaceAll(obfuscated, original as String);
+  });
+
+  print(deobfuscated);
+}
+```
+
+**Usage:**
+```bash
+dart run deobfuscate.dart crash.txt symbol_map.json
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    Common issues and solutions
+  </Card>
+  <Card title="Configuration" icon="gear" href="/essentials/configuration">
+    Fine-tune obfuscation passes
+  </Card>
+</CardGroup>

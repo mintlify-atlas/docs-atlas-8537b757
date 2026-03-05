@@ -1,0 +1,206 @@
+---
+title: "Obfuscation Overview"
+description: "Understand how Refractor's pass-based obfuscation system protects your Dart code"
+---
+
+## What is Obfuscation?
+
+Refractor transforms compiled Dart kernel bytecode (`.dill` files) to make reverse engineering harder. Unlike source-level obfuscation, Refractor operates on the **kernel AST** after Dart's frontend compilation, giving you precise control over what gets transformed.
+
+## The Pass System
+
+Refractor uses a **multi-pass architecture** where each pass performs a specific transformation on the kernel Component:
+
+<Steps>
+  <Step title="Compile to Kernel">
+    Your Dart source code is compiled to kernel bytecode (`.dill` format) using the Dart frontend compiler.
+  </Step>
+  
+  <Step title="Apply Obfuscation Passes">
+    Each enabled pass walks the kernel AST and applies transformations in sequence. Passes mutate the Component in place.
+  </Step>
+  
+  <Step title="Output Binary">
+    The obfuscated kernel is compiled to your target format: native executable, AOT snapshot, JIT snapshot, or kernel file.
+  </Step>
+</Steps>
+
+### Pass Execution Order
+
+Passes run in this order:
+
+1. **Rename** — rewrites identifiers first so other passes work with obfuscated names
+2. **String Encryption** — replaces string literals with encrypted byte arrays
+3. **Dead Code Injection** — inserts unreachable branches to confuse decompilers
+
+<Info>
+The order matters: renaming identifiers before string encryption ensures that even the decoder function has an obfuscated name.
+</Info>
+
+## Base Pass Architecture
+
+All passes inherit from the `Pass` abstract class (lib/src/engine/runner/pass.dart:4):
+
+```dart
+abstract class Pass {
+  String get name;
+  void run(Component component, PassContext context);
+}
+```
+
+### PassContext
+
+Every pass receives a `PassContext` with shared state:
+
+- **SymbolTable** — tracks original → obfuscated name mappings for the symbol map
+- **NameGenerator** — generates sequential obfuscated names like `_$0`, `_$1`
+- **PassOptions** — configuration from `refractor.yaml`
+- **shouldObfuscateLibrary()** — determines if a library is in scope for obfuscation
+
+### Visitor Pattern
+
+Passes use two helper base classes:
+
+- **PassVisitor** (lib/src/engine/passes/pass_visitor.dart:4) — extends `RecursiveVisitor` for read-only tree walking
+- **PassTransformer** (lib/src/engine/passes/pass_transformer.dart:4) — extends `Transformer` for mutating transformations
+
+Both automatically skip libraries outside the obfuscation scope.
+
+## Available Passes
+
+<CardGroup cols={3}>
+  <Card title="Rename Pass" icon="signature" href="/obfuscation/rename-pass">
+    Rewrites class, method, and field names to short meaningless identifiers
+  </Card>
+  
+  <Card title="String Encryption" icon="lock" href="/obfuscation/string-encryption">
+    Replaces string literals with XOR-encrypted byte arrays decoded at runtime
+  </Card>
+  
+  <Card title="Dead Code Injection" icon="code-branch" href="/obfuscation/dead-code">
+    Inserts unreachable branches to hinder static analysis tools
+  </Card>
+</CardGroup>
+
+## Obfuscation Scope
+
+Refractor only obfuscates **your project code**:
+
+- Libraries matching your `pubspec.yaml` name
+- Files under the current working directory
+
+**Not obfuscated:**
+- Dart SDK libraries (`dart:core`, `dart:io`, etc.)
+- External dependencies from pub.dev
+- Files matching patterns in the `exclude` list
+
+<Warning>
+Generated files like `*.g.dart` and `*.freezed.dart` should be excluded to prevent breaking code generation.
+</Warning>
+
+### Example Configuration
+
+```yaml
+refractor:
+  symbol_map: symbol_map.json
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+  verbose: false
+
+passes:
+  rename:
+    preserve_main: true
+
+  string_encrypt:
+    xor_key: 0x5A
+    exclude_patterns:
+      - "^https://"
+
+  dead_code:
+    max_insertions_per_procedure: 2
+```
+
+<Tip>
+Each pass can be set to `true` (enabled with defaults), `false` (disabled), or a map with specific options.
+</Tip>
+
+## Performance Considerations
+
+### Runtime Impact
+
+- **Rename**: Zero runtime cost — only changes identifiers
+- **String Encryption**: Small overhead for decoding strings at first use
+- **Dead Code**: Zero runtime cost — the Dart VM optimizer eliminates `if (false)` branches
+
+### Binary Size
+
+- **Rename**: Reduces binary size (shorter identifiers)
+- **String Encryption**: Increases size slightly (decoder function + encoded bytes)
+- **Dead Code**: Increases size (unreachable code preserved in binary)
+
+## Symbol Map
+
+The `symbol_map` option generates a JSON file mapping obfuscated names back to originals:
+
+```json
+{
+  "UserProfile": "_$0",
+  "calculateTotal": "_$1",
+  "apiEndpoint": "_$2"
+}
+```
+
+<Warning>
+Keep the symbol map secure — it reveals your obfuscation scheme. Never ship it with your application.
+</Warning>
+
+Use it for:
+- Debugging obfuscated crash reports
+- Understanding decompiled code during security audits
+- Verifying obfuscation effectiveness
+
+## How Passes Work Together
+
+Passes are designed to compose safely:
+
+1. **Rename** creates a mapping of all identifiers and applies them globally
+2. **String Encryption** injects a decoder function (which gets renamed if Rename runs first)
+3. **Dead Code** inserts unreachable branches throughout procedure bodies
+
+Example of all three passes working together:
+
+**Before obfuscation:**
+```dart
+class UserService {
+  String apiUrl = "https://api.example.com";
+  
+  void fetchUser(int id) {
+    print("Fetching user $id");
+  }
+}
+```
+
+**After obfuscation:**
+```dart
+class _$0 {
+  String _$1 = "https://api.example.com"; // preserved by exclude_patterns
+  
+  void _$2(int _$3) {
+    if (false) { var _d = 0; _d = 1; } // dead code
+    _$4(_obfDecode$([70, 58, 47, ...], 0x5A)); // encrypted "Fetching user "
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Learn About Rename" icon="signature" href="/obfuscation/rename-pass">
+    Dive into identifier obfuscation mechanics
+  </Card>
+  
+  <Card title="Explore String Encryption" icon="lock" href="/obfuscation/string-encryption">
+    Understand XOR encoding and runtime decoding
+  </Card>
+</CardGroup>

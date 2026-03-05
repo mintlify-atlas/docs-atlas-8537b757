@@ -1,0 +1,258 @@
+---
+title: 'refractor inspect'
+description: 'Show the contents of a compiled .dill file.'
+---
+
+The `inspect` command prints a hierarchical tree representation of the contents of a Dart kernel (`.dill`) file. Use it to verify obfuscation results, debug compilation issues, or explore the structure of compiled Dart code.
+
+## Usage
+
+```bash
+refractor inspect [options] <path.dill>
+```
+
+<ParamField path="path.dill" type="string" required>
+  Path to the `.dill` file to inspect. This is a positional argument (not a flag).
+</ParamField>
+
+## Options
+
+<ParamField path="--sdk" type="boolean" default="false">
+  Include `dart:*` SDK libraries in the output. By default, only user code is shown.
+</ParamField>
+
+## Output Format
+
+The inspect command displays a tree structure showing:
+
+- **Libraries** - Top-level modules and packages
+- **Classes** - Type definitions and their members
+- **Procedures** - Functions and methods
+- **Fields** - Class properties and variables
+
+### Example Output
+
+Inspecting an obfuscated kernel file:
+
+```bash
+refractor inspect build/out.dill
+```
+
+```
+📦 file:///Users/dev/myapp/lib/main.dart
+  └─ class A
+      ├─ field B: String
+      ├─ constructor A()
+      └─ method C() → void
+  └─ procedure D() → void
+
+📦 package:myapp/utils.dart
+  └─ class E
+      └─ method F() → int
+```
+
+<Note>
+  Notice the short, meaningless names (`A`, `B`, `C`, etc.) - this indicates the rename pass successfully obfuscated the original identifiers.
+</Note>
+
+### With SDK Libraries
+
+Include Dart's core libraries in the output:
+
+```bash
+refractor inspect --sdk build/out.dill
+```
+
+```
+📦 dart:core
+  └─ class Object
+      ├─ method toString() → String
+      ├─ method hashCode → int
+      └─ ...
+  └─ class String
+      └─ ...
+
+📦 dart:async
+  └─ class Future
+      └─ ...
+
+📦 file:///Users/dev/myapp/lib/main.dart
+  └─ class A
+      └─ ...
+```
+
+<Warning>
+  The `--sdk` flag produces very verbose output since Dart's SDK contains hundreds of classes and functions. Use it only when debugging SDK-related issues.
+</Warning>
+
+## Use Cases
+
+### Verify Obfuscation
+
+Check that your code was properly obfuscated:
+
+<CodeGroup>
+
+```bash Before Obfuscation
+refractor inspect original.dill
+```
+
+```
+📦 package:myapp/main.dart
+  └─ class UserService
+      ├─ field apiClient: HttpClient
+      ├─ method fetchUserProfile() → Future<User>
+      └─ method updateSettings() → void
+```
+
+```bash After Obfuscation
+refractor inspect build/out.dill
+```
+
+```
+📦 package:myapp/main.dart
+  └─ class A
+      ├─ field B: C
+      ├─ method D() → E<F>
+      └─ method G() → void
+```
+
+</CodeGroup>
+
+### Debug Compilation Issues
+
+If your build fails after obfuscation, inspect the kernel file to identify problematic transformations:
+
+```bash
+refractor build --target kernel
+refractor inspect build/out.dill
+```
+
+### Compare Original vs Obfuscated
+
+Generate a non-obfuscated kernel file for comparison:
+
+```bash
+# Create unobfuscated kernel
+dart compile kernel lib/main.dart -o build/original.dill
+
+# Create obfuscated kernel
+refractor build --target kernel
+
+# Compare structures
+refractor inspect build/original.dill > original.txt
+refractor inspect build/out.dill > obfuscated.txt
+diff original.txt obfuscated.txt
+```
+
+<Tip>
+  Use the symbol map (generated during build) to reverse-lookup obfuscated names back to their originals when debugging.
+</Tip>
+
+### Analyze Third-Party Packages
+
+Inspect any `.dill` file, including compiled packages:
+
+```bash
+refractor inspect ~/.pub-cache/hosted/pub.dev/package_name-1.0.0/lib/package.dill
+```
+
+## Tree Structure Reference
+
+The output tree uses these symbols:
+
+- `📦` - Library or package
+- `└─` - Last item in a group
+- `├─` - Item with siblings below
+- `class` - Type definition
+- `field` - Member variable
+- `constructor` - Constructor method
+- `method` - Instance or static method
+- `procedure` - Top-level function
+
+<Info>
+  The tree format is designed for human readability. For programmatic analysis, consider using the Dart kernel API directly.
+</Info>
+
+## Technical Details
+
+The inspect command:
+
+1. Loads the `.dill` file using `FileKernelIO().load()`
+2. Parses the kernel component structure with `KernelParser()`
+3. Filters out SDK libraries unless `--sdk` is specified
+4. Renders a hierarchical tree with `KernelTreePrinter()`
+
+The output includes all kernel entities visible in the component's library scope.
+
+## Examples
+
+### Inspect Build Output
+
+```bash
+refractor build --target kernel
+refractor inspect build/out.dill
+```
+
+### Check Specific Library
+
+Build a kernel file and verify a specific library was obfuscated:
+
+```bash
+refractor inspect build/out.dill | grep "package:myapp"
+```
+
+### Save Output for Analysis
+
+```bash
+refractor inspect build/out.dill > kernel-structure.txt
+```
+
+### Compare Before and After
+
+```bash
+# Generate both versions
+dart compile kernel lib/main.dart -o before.dill
+refractor build --target kernel --output after
+
+# Inspect both
+refractor inspect before.dill
+refractor inspect after/out.dill
+```
+
+## Common Issues
+
+### Missing Argument Error
+
+If you see:
+
+```
+Missing required argument: <path.dill>
+```
+
+Make sure you provide the path to a `.dill` file:
+
+```bash
+refractor inspect build/out.dill
+```
+
+### File Not Found
+
+If the `.dill` file doesn't exist:
+
+```
+Error: Cannot open file: build/out.dill
+```
+
+Ensure you've run `refractor build --target kernel` first, or provide the correct path.
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="refractor build" icon="hammer" href="./build">
+    Generate .dill files to inspect
+  </Card>
+  <Card title="Understanding Obfuscation" icon="book" href="../essentials/how-it-works">
+    Learn how Refractor transforms your code
+  </Card>
+</CardGroup>

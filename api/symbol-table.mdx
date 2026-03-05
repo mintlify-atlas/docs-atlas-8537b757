@@ -1,0 +1,254 @@
+---
+title: SymbolTable
+description: Tracks mappings from original identifiers to obfuscated names
+---
+
+## Overview
+
+The `SymbolTable` class tracks the mapping from original identifiers to their obfuscated names. It's useful for generating a symbol map that can be used to deobfuscate stack traces and debug obfuscated builds.
+
+This class is pure (no `dart:io` dependencies in the core implementation). File writing is available via the `writeToFile()` method.
+
+## Constructor
+
+```dart
+SymbolTable()
+```
+
+Creates an empty symbol table. No parameters required.
+
+## Methods
+
+### record()
+
+Records a rename mapping: the original identifier was renamed to the obfuscated identifier.
+
+```dart
+void record(String original, String obfuscated)
+```
+
+<ParamField path="original" type="String" required>
+  The original identifier name (e.g., `'MyClass'`, `'myMethod'`)
+</ParamField>
+
+<ParamField path="obfuscated" type="String" required>
+  The obfuscated identifier name (e.g., `'_$0'`, `'_$1'`)
+</ParamField>
+
+### original()
+
+Looks up the original name for an obfuscated identifier.
+
+```dart
+String? original(String obfuscated)
+```
+
+<ParamField path="obfuscated" type="String" required>
+  The obfuscated identifier to look up
+</ParamField>
+
+<ResponseField name="String?" type="String?">
+  Returns the original name if found, or `null` if the mapping doesn't exist
+</ResponseField>
+
+### obfuscated()
+
+Looks up the obfuscated name for an original identifier (reverse lookup).
+
+```dart
+String? obfuscated(String original)
+```
+
+<ParamField path="original" type="String" required>
+  The original identifier to look up
+</ParamField>
+
+<ResponseField name="String?" type="String?">
+  Returns the obfuscated name if found, or `null` if the mapping doesn't exist
+</ResponseField>
+
+<Info>
+  The `obfuscated()` method performs a reverse lookup by iterating through all entries. For better performance on large symbol tables, use `original()` when possible.
+</Info>
+
+### writeToFile()
+
+Writes the symbol table to a JSON file on disk.
+
+```dart
+void writeToFile(String path)
+```
+
+<ParamField path="path" type="String" required>
+  File path where the JSON symbol map should be written. Parent directories are created automatically if they don't exist.
+</ParamField>
+
+### toJson()
+
+Exports the symbol table as an immutable JSON-encodable map.
+
+```dart
+Map<String, String> toJson()
+```
+
+<ResponseField name="Map<String, String>" type="Map<String, String>">
+  Unmodifiable map with obfuscated names as keys and original names as values
+</ResponseField>
+
+### toJsonString()
+
+Exports the symbol table as a pretty-printed JSON string.
+
+```dart
+String toJsonString()
+```
+
+<ResponseField name="String" type="String">
+  Pretty-printed JSON string with 2-space indentation
+</ResponseField>
+
+## Properties
+
+### size
+
+Returns the number of mappings in the symbol table.
+
+```dart
+int get size
+```
+
+## JSON Format
+
+The symbol table is exported as a JSON object mapping obfuscated names to original names:
+
+```json
+{
+  "_$0": "MyClass",
+  "_$1": "myMethod",
+  "_$2": "MyOtherClass",
+  "_$3": "anotherMethod"
+}
+```
+
+<Note>
+  The keys are the obfuscated names and the values are the original names. This format is optimized for fast lookups during stack trace deobfuscation.
+</Note>
+
+## Usage Example
+
+### Basic Usage
+
+```dart
+import 'package:refractor/refractor.dart';
+
+void main() {
+  final table = SymbolTable();
+  
+  // Record some mappings
+  table.record('MyClass', r'_$0');
+  table.record('myMethod', r'_$1');
+  table.record('UserService', r'_$2');
+  
+  // Look up original names
+  print(table.original(r'_$0')); // 'MyClass'
+  print(table.original(r'_$1')); // 'myMethod'
+  
+  // Reverse lookup
+  print(table.obfuscated('MyClass')); // '_$0'
+  
+  // Check size
+  print('Mapped ${table.size} symbols');
+  
+  // Export to JSON
+  final json = table.toJsonString();
+  print(json);
+}
+```
+
+### Writing to File
+
+```dart
+import 'package:refractor/refractor.dart';
+
+void main() {
+  final table = SymbolTable()
+    ..record('MyClass', r'_$0')
+    ..record('myMethod', r'_$1');
+  
+  // Write to file (creates parent directories automatically)
+  table.writeToFile('build/symbols/app.json');
+  
+  print('Symbol map written successfully');
+}
+```
+
+### With PassRunner
+
+```dart
+import 'package:kernel/kernel.dart';
+import 'package:refractor/refractor.dart';
+
+void main() {
+  final component = loadComponentFromBinary('app.dill');
+  
+  final runner = PassRunner(
+    passes: [RenamePass(), StringEncryptPass()],
+  );
+  
+  // Run passes and get symbol table
+  final (obfuscated, symbolTable) = runner.run(
+    component,
+    PassOptions(),
+  );
+  
+  // Save symbol map for later deobfuscation
+  symbolTable.writeToFile('build/symbols.json');
+  
+  print('Obfuscated ${symbolTable.size} identifiers');
+}
+```
+
+## Deobfuscating Stack Traces
+
+Use the symbol table to deobfuscate stack traces from production builds:
+
+```dart
+import 'dart:convert';
+import 'dart:io';
+
+void deobfuscateStackTrace(String stackTrace, String symbolMapPath) {
+  // Load symbol map
+  final json = jsonDecode(File(symbolMapPath).readAsStringSync());
+  final symbolMap = Map<String, String>.from(json as Map);
+  
+  // Replace obfuscated names with originals
+  var deobfuscated = stackTrace;
+  for (final entry in symbolMap.entries) {
+    deobfuscated = deobfuscated.replaceAll(entry.key, entry.value);
+  }
+  
+  print(deobfuscated);
+}
+```
+
+<Warning>
+  Store your symbol maps securely. Anyone with access to the symbol map can reverse the obfuscation.
+</Warning>
+
+<Info>
+  Symbol maps are especially valuable for:
+  - Debugging production crashes
+  - Analyzing performance profiles
+  - Understanding error reports from users
+</Info>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="PassRunner" icon="gears" href="/api/pass-runner">
+    Returns a SymbolTable after running passes
+  </Card>
+  <Card title="RefractorEngine" icon="engine" href="/api/refractor-engine">
+    BuildResult includes the final SymbolTable
+  </Card>
+</CardGroup>

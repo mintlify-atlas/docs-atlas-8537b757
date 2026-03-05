@@ -1,0 +1,287 @@
+---
+title: 'StringEncryptPass'
+description: 'Obfuscation pass that encrypts string literals using XOR encoding'
+---
+
+## Overview
+
+`StringEncryptPass` is an obfuscation pass that replaces plaintext `StringLiteral` nodes with calls to an injected decode helper, so strings are not visible in the compiled binary. This protects sensitive strings like API keys, URLs, and messages from being easily extracted.
+
+<Info>
+  The pass uses XOR encoding with a configurable key (default `0x5A`). At runtime, the injected `_obfDecode$` helper reverses this encoding to recover the original string.
+</Info>
+
+## Class Definition
+
+```dart
+class StringEncryptPass extends Pass {
+  StringEncryptPass({this.xorKey = 0x5A});
+  
+  final int xorKey;
+
+  @override
+  String get name => 'string_encrypt';
+
+  @override
+  void run(Component component, PassContext context);
+  
+  List<int> encode(String s);
+}
+```
+
+Source: `lib/src/engine/passes/string_encrypt/string_encrypt_pass.dart:14`
+
+## Constructor Parameters
+
+<ParamField path="xorKey" type="int" default="0x5A">
+  The XOR key used for encoding string literals. Must be a valid byte value (0-255).
+</ParamField>
+
+## How It Works
+
+<CardGroup cols={2}>
+  <Card title="Encoding" icon="lock">
+    Each UTF-8 byte of the string is XORed with the `xorKey` to produce an encrypted byte array
+  </Card>
+  <Card title="Decoding" icon="unlock">
+    At runtime, the injected `_obfDecode$` helper XORs the bytes again with the same key to recover the original string
+  </Card>
+</CardGroup>
+
+### Injected Helper Function
+
+The pass automatically injects this helper into the first user library:
+
+```dart
+String _obfDecode$(List<int> bytes, int key) =>
+    String.fromCharCodes(bytes.map((b) => b ^ key));
+```
+
+Source: `lib/src/engine/passes/string_encrypt/string_encrypt_pass.dart:52`
+
+### Transformation Example
+
+Before:
+```dart
+String greet() {
+  return 'Hello, World!';
+}
+```
+
+After:
+```dart
+String greet() {
+  return _obfDecode$([0x32, 0x3F, 0x3C, 0x3C, 0x3D, ...], 0x5A);
+}
+```
+
+## Configuration Options
+
+The `StringEncryptPass` behavior is controlled through `PassOptions`:
+
+<ParamField path="stringExcludePatterns" type="List<RegExp>" default="[]">
+  Regular expression patterns for string literals that should not be encrypted. Useful for preserving strings that must remain in plaintext (e.g., protocol identifiers, file extensions).
+</ParamField>
+
+## String Filtering
+
+The pass automatically skips:
+
+- **Constant expressions** (strings inside `ConstantExpression` nodes)
+- **Annotations** (strings in class/method annotations)
+- **Dart SDK library strings** (strings in `dart:*` libraries)
+- **Strings matching exclude patterns** (configured via `stringExcludePatterns`)
+- **External package strings** (strings not in the project package)
+
+<Warning>
+  Encrypting strings used in annotations or constant expressions can break the code, as these require compile-time constants.
+</Warning>
+
+## Methods
+
+### run()
+
+```dart
+void run(Component component, PassContext context)
+```
+
+Runs the string encryption pass over the component:
+
+1. Finds the first user library to inject the `_obfDecode$` helper
+2. Injects the helper procedure
+3. Walks the component and replaces string literals with decode calls
+
+<ParamField path="component" type="Component" required>
+  The Dart kernel component to transform
+</ParamField>
+
+<ParamField path="context" type="PassContext" required>
+  Shared context containing options, symbol table, and name generator
+</ParamField>
+
+### encode()
+
+```dart
+List<int> encode(String s)
+```
+
+Encodes a string using XOR with the configured `xorKey`.
+
+<ParamField path="s" type="String" required>
+  The string to encode
+</ParamField>
+
+<ResponseField name="return" type="List<int>">
+  The encoded byte array where each byte is `original_byte ^ xorKey`
+</ResponseField>
+
+Source: `lib/src/engine/passes/string_encrypt/string_encrypt_pass.dart:178`
+
+## Usage Example
+
+### Basic Usage
+
+```dart
+import 'package:kernel/kernel.dart';
+import 'package:refractor/refractor.dart';
+
+// Load a Dart kernel component
+final component = loadComponentFromBinary('app.dill');
+
+// Create context with options
+final context = PassContext(
+  symbolTable: SymbolTable(),
+  nameGenerator: NameGenerator(),
+  options: PassOptions(
+    stringExcludePatterns: [RegExp(r'^https?://')]  // Don't encrypt URLs
+  ),
+);
+
+// Run the string encrypt pass with custom key
+final stringPass = StringEncryptPass(xorKey: 0xFF);
+stringPass.run(component, context);
+
+// All non-excluded strings are now encrypted
+```
+
+### With PassRunner
+
+```dart
+import 'package:refractor/refractor.dart';
+
+// Create pass runner with string encryption
+final runner = PassRunner(
+  passes: [
+    StringEncryptPass(xorKey: 0x42),
+  ],
+);
+
+// Run all passes
+final (obfuscated, symbolTable) = runner.run(
+  component,
+  PassOptions(
+    stringExcludePatterns: [RegExp('DO_NOT_ENCRYPT')],
+  ),
+);
+```
+
+### Combined with Other Passes
+
+```dart
+import 'package:refractor/refractor.dart';
+
+// Typical obfuscation pipeline
+final runner = PassRunner(
+  passes: [
+    RenamePass(),                    // Rename identifiers first
+    StringEncryptPass(xorKey: 0x5A), // Then encrypt strings
+    DeadCodePass(maxInsertionsPerProcedure: 2),
+  ],
+);
+
+final (obfuscated, symbolTable) = runner.run(component, PassOptions());
+```
+
+## Encoding Example
+
+```dart
+final pass = StringEncryptPass(xorKey: 0x5A);
+final encoded = pass.encode('hello');
+
+print(encoded); // [0x32, 0x3F, 0x3C, 0x3C, 0x3D]
+
+// Decode by XORing again with the same key
+final decoded = String.fromCharCodes(
+  encoded.map((b) => b ^ 0x5A)
+);
+print(decoded); // 'hello'
+```
+
+## Testing
+
+```dart
+import 'dart:convert';
+import 'package:refractor/refractor.dart';
+import 'package:test/test.dart';
+
+test('round-trip XOR with known key', () {
+  final pass = StringEncryptPass();
+  const input = 'hello';
+  final encoded = pass.encode(input);
+
+  // Decode by XOR-ing again with the same key
+  final decoded = utf8.decode(encoded.map((b) => b ^ 0x5A).toList());
+  expect(decoded, equals(input));
+});
+
+test('string literal in procedure body is replaced', () {
+  final proc = Procedure(
+    Name('greet'),
+    ProcedureKind.Method,
+    FunctionNode(
+      Block([ReturnStatement(StringLiteral('hello'))]),
+    ),
+    fileUri: userLib.fileUri,
+  );
+  userLib.addProcedure(proc);
+
+  component = makeComponent(coreLib: coreLib, userLib: userLib);
+  final context = makePassContext();
+  StringEncryptPass().run(component, context);
+
+  final body = proc.function.body! as Block;
+  final ret = body.statements.first as ReturnStatement;
+  expect(ret.expression, isA<StaticInvocation>());
+});
+```
+
+Source: `test/engine/passes/string_encrypt_pass_test.dart:12`
+
+## Performance Considerations
+
+<Info>
+  The XOR decoding operation is extremely fast (bitwise operations) and has negligible runtime overhead. The Dart VM can optimize these operations efficiently.
+</Info>
+
+## Security Notes
+
+<Note>
+  XOR encoding is **not cryptographically secure**. It's designed to prevent casual inspection of strings in the binary, not to protect against determined attackers. For highly sensitive data, consider using proper encryption libraries.
+</Note>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="PassRunner" icon="gears" href="/api/pass-runner">
+    Orchestrates multiple passes
+  </Card>
+  <Card title="RenamePass" icon="signature" href="/api/passes/rename-pass">
+    Rename identifiers to meaningless names
+  </Card>
+  <Card title="DeadCodePass" icon="code-branch" href="/api/passes/dead-code-pass">
+    Injects unreachable dead code branches
+  </Card>
+  <Card title="RefractorEngine" icon="engine" href="/api/refractor-engine">
+    Main obfuscation engine
+  </Card>
+</CardGroup>

@@ -1,0 +1,91 @@
+---
+title: Introduction
+description: Dart kernel obfuscation tool that protects your code from reverse engineering
+---
+
+## What is Refractor?
+
+Refractor is a powerful Dart kernel (`.dill`) obfuscation tool that protects your compiled Dart applications from reverse engineering and static analysis. It compiles your Dart code to kernel bytecode, applies configurable obfuscation transformations, and outputs production-ready executables, AOT snapshots, JIT snapshots, or kernel files.
+
+<Note>
+Refractor is in early stages of development. Real impact at the generated binary may differ from expectations.
+</Note>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Identifier Renaming" icon="signature" href="/obfuscation/rename-pass">
+    Rewrites class, method, and field names to short meaningless identifiers
+  </Card>
+  <Card title="String Encryption" icon="lock" href="/obfuscation/string-encryption">
+    Replaces string literals with XOR-encoded byte arrays and runtime decoder
+  </Card>
+  <Card title="Dead Code Injection" icon="code-branch" href="/obfuscation/dead-code">
+    Inserts unreachable branches to hinder static analysis and decompilers
+  </Card>
+  <Card title="Multiple Build Targets" icon="bullseye-arrow" href="/guides/build-targets">
+    Output as executable, AOT snapshot, JIT snapshot, or kernel file
+  </Card>
+  <Card title="Symbol Map" icon="map" href="/configuration/symbol-map">
+    JSON mapping of obfuscated names back to originals for debugging
+  </Card>
+  <Card title="Configurable Exclusions" icon="filter" href="/configuration/exclusions">
+    Glob-based patterns to exclude generated files and specific libraries
+  </Card>
+</CardGroup>
+
+## How It Works
+
+Refractor operates in four stages:
+
+<Steps>
+  <Step title="Compile to Kernel">
+    Your Dart entrypoint is compiled to kernel bytecode (`.dill` format)
+  </Step>
+  <Step title="Apply Obfuscation Passes">
+    Configured passes transform the kernel AST: renaming identifiers, encrypting strings, and injecting dead code
+  </Step>
+  <Step title="Write Obfuscated Kernel">
+    The transformed kernel is written to an intermediate `.dill` file
+  </Step>
+  <Step title="Compile to Target">
+    The obfuscated kernel is compiled to your target format (exe, AOT, JIT, or kernel)
+  </Step>
+</Steps>
+
+## Use Cases
+
+- **Mobile app protection** — Obfuscate Flutter apps before release to app stores
+- **CLI tool distribution** — Protect proprietary business logic in command-line tools
+- **Server-side code** — Harden Dart backend services against reverse engineering
+- **Library distribution** — Protect algorithms and IP in published packages
+
+## Quick Example
+
+```bash
+# Install Refractor
+dart pub global activate --source git https://github.com/yardexx/refractor.git
+
+# Initialize configuration
+refractor init
+
+# Build with obfuscation
+refractor build --target exe --output build
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Refractor and set up your environment
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build your first obfuscated application in minutes
+  </Card>
+  <Card title="Commands" icon="terminal" href="/commands/build">
+    Explore the command-line interface
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/refractor-yaml">
+    Configure obfuscation passes and options
+  </Card>
+</CardGroup>
