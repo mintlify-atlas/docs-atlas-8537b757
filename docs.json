@@ -74,7 +74,11 @@
             "pages": [
               "api/refractor-engine",
               "api/pass-runner",
-              "api/symbol-table"
+              "api/symbol-table",
+              "api/name-generator",
+              "api/pass",
+              "api/pass-context",
+              "api/pass-options"
             ]
           },
           {

@@ -1,0 +1,217 @@
+---
+title: "PassContext"
+description: "Shared mutable context passed to obfuscation passes"
+---
+
+## Overview
+
+The `PassContext` class provides shared state and utilities that all obfuscation passes can access. It contains the symbol table for tracking name mappings, a name generator for creating unique identifiers, configuration options, and scope resolution logic.
+
+Source: `lib/src/engine/runner/pass_context.dart:10`
+
+## Constructor
+
+```dart
+PassContext({
+  required SymbolTable symbolTable,
+  required NameGenerator nameGenerator,
+  required PassOptions options,
+})
+```
+
+<ParamField path="symbolTable" type="SymbolTable" required>
+  Tracks original → obfuscated name mappings for debugging
+</ParamField>
+
+<ParamField path="nameGenerator" type="NameGenerator" required>
+  Generates unique sequential obfuscated identifiers
+</ParamField>
+
+<ParamField path="options" type="PassOptions" required>
+  Configuration options (exclusions, preserve_main, verbose, etc.)
+</ParamField>
+
+<Note>
+  The `PassContext` automatically detects the project root and package name from `pubspec.yaml` when constructed. This is used by `shouldObfuscateLibrary()` to determine scope.
+</Note>
+
+## Properties
+
+### symbolTable
+
+```dart
+final SymbolTable symbolTable
+```
+
+<ResponseField name="symbolTable" type="SymbolTable">
+  Shared symbol table for recording original → obfuscated name mappings. All passes can add entries here.
+</ResponseField>
+
+### nameGenerator
+
+```dart
+final NameGenerator nameGenerator
+```
+
+<ResponseField name="nameGenerator" type="NameGenerator">
+  Shared name generator. Passes should call `nameGenerator.next()` to get unique obfuscated identifiers.
+</ResponseField>
+
+### options
+
+```dart
+final PassOptions options
+```
+
+<ResponseField name="options" type="PassOptions">
+  Configuration options including exclusion patterns, `preserve_main`, string encryption settings, and verbose logging.
+</ResponseField>
+
+## Methods
+
+### shouldObfuscateLibrary()
+
+```dart
+bool shouldObfuscateLibrary(Library library)
+```
+
+Determines whether a given library belongs to user code that should be obfuscated.
+
+<ParamField path="library" type="Library" required>
+  The kernel `Library` object to check
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  `true` if the library should be obfuscated, `false` otherwise
+</ResponseField>
+
+**Returns `false` for:**
+- SDK libraries (`dart:*`)
+- External packages (package URIs not matching the current project)
+- Libraries matching exclusion glob patterns in `options.excludeLibraryUriPatterns`
+
+**Returns `true` for:**
+- Libraries in the current project's package (`package:my_app/*`)
+- File-based libraries in the current directory
+
+**Example:**
+
+```dart
+@override
+void run(Component component, PassContext context) {
+  for (final library in component.libraries) {
+    if (!context.shouldObfuscateLibrary(library)) {
+      continue; // Skip this library
+    }
+    
+    // Safe to obfuscate—this is user code
+    for (final klass in library.classes) {
+      // Transform classes...
+    }
+  }
+}
+```
+
+## Scope Detection
+
+`PassContext` automatically detects obfuscation scope:
+
+1. **Project package detection:**
+   - Reads `pubspec.yaml` from the current working directory
+   - Extracts the `name` field to identify the project package
+   - Example: `name: my_app` → only `package:my_app/*` is obfuscated
+
+2. **File-based libraries:**
+   - Detects the project root path
+   - Includes all `file:` URIs under the project directory
+
+3. **Exclusion patterns:**
+   - Applies glob patterns from `options.excludeLibraryUriPatterns`
+   - Common patterns: `**/*.g.dart`, `**/*.freezed.dart`
+
+<Info>
+  This automatic scope detection ensures that only your code is obfuscated—external dependencies and SDK libraries are never touched, preventing runtime errors.
+</Info>
+
+## Usage Example
+
+```dart
+import 'package:kernel/kernel.dart';
+import 'package:refractor/refractor.dart';
+
+class MyPass implements Pass {
+  @override
+  String get name => 'my_pass';
+
+  @override
+  void run(Component component, PassContext context) {
+    for (final library in component.libraries) {
+      // Check scope
+      if (!context.shouldObfuscateLibrary(library)) continue;
+
+      for (final klass in library.classes) {
+        final originalName = klass.name;
+        
+        // Generate obfuscated name
+        final obfuscatedName = context.nameGenerator.next();
+        
+        // Record mapping
+        context.symbolTable.record(originalName, obfuscatedName);
+        
+        // Apply transformation
+        klass.name = obfuscatedName;
+
+        // Verbose logging
+        if (context.options.verbose) {
+          print('Renamed $originalName -> $obfuscatedName');
+        }
+      }
+    }
+  }
+}
+```
+
+## Integration with PassRunner
+
+The `PassRunner` creates a single `PassContext` instance and passes it to all configured passes:
+
+```dart
+final context = PassContext(
+  symbolTable: SymbolTable(),
+  nameGenerator: NameGenerator(),
+  options: PassOptions(
+    excludeLibraryUriPatterns: [Glob('**/*.g.dart')],
+    preserveMain: true,
+    verbose: true,
+  ),
+);
+
+for (final pass in passes) {
+  pass.run(component, context); // Same context for all passes
+}
+```
+
+This ensures:
+- All passes share the same symbol table (consistent mappings)
+- Name generation is sequential across all passes (no collisions)
+- Configuration is consistent
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Pass Interface" icon="puzzle-piece" href="/api/pass">
+    Base class that receives PassContext
+  </Card>
+  <Card title="PassRunner" icon="gears" href="/api/pass-runner">
+    Creates and manages PassContext
+  </Card>
+  <Card title="PassOptions" icon="gear" href="/api/pass-options">
+    Configuration options in context
+  </Card>
+  <Card title="SymbolTable" icon="table" href="/api/symbol-table">
+    Symbol table in context
+  </Card>
+  <Card title="NameGenerator" icon="signature" href="/api/name-generator">
+    Name generator in context
+  </Card>
+</CardGroup>

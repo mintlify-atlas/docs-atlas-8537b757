@@ -1,0 +1,154 @@
+---
+title: "Pass Interface"
+description: "Base interface for all obfuscation passes"
+---
+
+## Overview
+
+The `Pass` abstract class is the base interface for all obfuscation transformations in Refractor. Each pass implements this interface to mutate the Dart kernel AST in a specific way (renaming, string encryption, dead code injection, etc.).
+
+Source: `lib/src/engine/runner/pass.dart:5`
+
+## Interface
+
+```dart
+abstract class Pass {
+  String get name;
+  void run(Component component, PassContext context);
+}
+```
+
+## Properties
+
+### name
+
+```dart
+String get name
+```
+
+<ResponseField name="name" type="String">
+  Human-readable identifier for this pass. Used in logging, error messages, and the `--passes` CLI flag.
+</ResponseField>
+
+## Methods
+
+### run()
+
+```dart
+void run(Component component, PassContext context)
+```
+
+Executes this pass over the kernel `Component`, mutating it in place. The pass can access shared state through the `context` parameter.
+
+<ParamField path="component" type="Component" required>
+  The Dart kernel AST to transform. This object is mutated in place.
+</ParamField>
+
+<ParamField path="context" type="PassContext" required>
+  Shared context containing the symbol table, name generator, configuration options, and scope resolution methods.
+</ParamField>
+
+<Note>
+  Passes mutate the `Component` directly rather than returning a new one. This is an intentional design choice for performance—Dart kernel ASTs can be large, and in-place mutation avoids expensive copying.
+</Note>
+
+## Built-in Passes
+
+Refractor includes three built-in passes:
+
+<CardGroup cols={3}>
+  <Card title="RenamePass" icon="signature" href="/api/passes/rename-pass">
+    Renames identifiers to `_$0`, `_$1`, etc.
+  </Card>
+  <Card title="StringEncryptPass" icon="lock" href="/api/passes/string-encrypt-pass">
+    Encrypts string literals with XOR encoding
+  </Card>
+  <Card title="DeadCodePass" icon="code-branch" href="/api/passes/dead-code-pass">
+    Injects unreachable `if (false)` branches
+  </Card>
+</CardGroup>
+
+## Implementing a Custom Pass
+
+You can create custom obfuscation passes by implementing this interface:
+
+```dart
+import 'package:kernel/kernel.dart';
+import 'package:refractor/refractor.dart';
+
+class ShuffleMethodsPass implements Pass {
+  @override
+  String get name => 'shuffle_methods';
+
+  @override
+  void run(Component component, PassContext context) {
+    for (final library in component.libraries) {
+      // Skip SDK libraries and excluded libraries
+      if (!context.shouldObfuscateLibrary(library)) continue;
+
+      for (final klass in library.classes) {
+        // Shuffle method order to complicate decompilation
+        klass.procedures.shuffle();
+      }
+    }
+  }
+}
+```
+
+## Pass Execution Order
+
+Passes are executed sequentially in the order they're added to the `PassRunner`:
+
+```dart
+final runner = PassRunner(passes: [
+  RenamePass(),           // 1st: Rename identifiers
+  StringEncryptPass(),    // 2nd: Encrypt strings
+  DeadCodePass(),         // 3rd: Inject dead code
+]);
+
+final (component, symbolTable) = runner.run(originalComponent, options);
+```
+
+<Warning>
+  Order matters! For example, `RenamePass` should typically run before `StringEncryptPass` so that string encryption can properly inject helper functions with obfuscated names.
+</Warning>
+
+## Accessing PassContext
+
+The `PassContext` provides essential utilities:
+
+```dart
+@override
+void run(Component component, PassContext context) {
+  // Check if a library should be obfuscated
+  if (!context.shouldObfuscateLibrary(library)) return;
+  
+  // Generate unique obfuscated names
+  final newName = context.nameGenerator.next();
+  
+  // Record the mapping for debugging
+  context.symbolTable.record(originalName, newName);
+  
+  // Access configuration options
+  if (context.options.verbose) {
+    print('Processing $originalName -> $newName');
+  }
+}
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="PassRunner" icon="gears" href="/api/pass-runner">
+    Orchestrates execution of multiple passes
+  </Card>
+  <Card title="PassContext" icon="layer-group" href="/api/pass-context">
+    Shared context passed to all passes
+  </Card>
+  <Card title="PassOptions" icon="gear" href="/api/pass-options">
+    Configuration options for passes
+  </Card>
+  <Card title="RefractorEngine" icon="engine" href="/api/refractor-engine">
+    Main engine that uses PassRunner
+  </Card>
+</CardGroup>

@@ -1,0 +1,230 @@
+---
+title: "PassOptions"
+description: "Configuration options for the obfuscation engine"
+---
+
+## Overview
+
+The `PassOptions` class contains configuration settings that control the behavior of obfuscation passes. It's created from the `refractor.yaml` configuration file and passed to passes via `PassContext`.
+
+Source: `lib/src/engine/runner/pass_options.dart:4`
+
+## Constructor
+
+```dart
+const PassOptions({
+  List<Glob> excludeLibraryUriPatterns = const [],
+  bool preserveMain = true,
+  List<RegExp> stringExcludePatterns = const [],
+  bool verbose = false,
+})
+```
+
+<ParamField path="excludeLibraryUriPatterns" type="List<Glob>" default="[]">
+  Glob patterns for library URIs/paths to skip during obfuscation. Common patterns: `**/*.g.dart`, `**/*.freezed.dart`.
+</ParamField>
+
+<ParamField path="preserveMain" type="bool" default="true">
+  If `true`, the top-level `main()` function is not renamed. Set to `false` only if you have a custom entry point.
+</ParamField>
+
+<ParamField path="stringExcludePatterns" type="List<RegExp>" default="[]">
+  Regular expressions for string literals that should not be encrypted. Example: `^https://` to preserve URLs.
+</ParamField>
+
+<ParamField path="verbose" type="bool" default="false">
+  If `true`, enables detailed logging during obfuscation. Useful for debugging.
+</ParamField>
+
+## Properties
+
+### excludeLibraryUriPatterns
+
+```dart
+final List<Glob> excludeLibraryUriPatterns
+```
+
+<ResponseField name="excludeLibraryUriPatterns" type="List<Glob>">
+  URI/path patterns for libraries to skip entirely. Used by `PassContext.shouldObfuscateLibrary()`.
+</ResponseField>
+
+Exclude generated files:
+
+```dart
+final options = PassOptions(
+  excludeLibraryUriPatterns: [
+    Glob('**/*.g.dart'),        // json_serializable
+    Glob('**/*.freezed.dart'),  // Freezed
+    Glob('**/*.gr.dart'),       // Auto Route
+  ],
+);
+```
+
+### preserveMain
+
+```dart
+final bool preserveMain
+```
+
+<ResponseField name="preserveMain" type="bool">
+  Controls whether the `main()` entry point is renamed. Default is `true` (don't rename).
+</ResponseField>
+
+**Why preserve `main`?**
+- Dart requires a top-level `main()` function as the entry point
+- Renaming it would break execution
+- Set to `false` only if you have a custom entry point mechanism
+
+### stringExcludePatterns
+
+```dart
+final List<RegExp> stringExcludePatterns
+```
+
+<ResponseField name="stringExcludePatterns" type="List<RegExp>">
+  Regular expressions for string literals that should not be encrypted by `StringEncryptPass`.
+</ResponseField>
+
+Exclude URLs and API keys:
+
+```dart
+final options = PassOptions(
+  stringExcludePatterns: [
+    RegExp(r'^https?://'),           // URLs
+    RegExp(r'^wss?://'),              // WebSocket URLs
+    RegExp(r'^[A-Z0-9_]{32,}$'),     // API keys (all caps, long)
+  ],
+);
+```
+
+<Warning>
+  String exclusion patterns are matched against the **entire** string literal. Use `^` and `$` anchors to match start/end.
+</Warning>
+
+### verbose
+
+```dart
+final bool verbose
+```
+
+<ResponseField name="verbose" type="bool">
+  Enables verbose logging. When `true`, passes log detailed information about transformations.
+</ResponseField>
+
+```dart
+final options = PassOptions(verbose: true);
+
+// Output during obfuscation:
+// [RenamePass] Renamed class MyClass -> _$0
+// [RenamePass] Renamed method calculateTotal -> _$1
+// [StringEncryptPass] Encrypted 15 string literals
+// [DeadCodePass] Inserted 8 dead branches
+```
+
+## Loading from refractor.yaml
+
+`PassOptions` is typically constructed from the `refractor.yaml` configuration file:
+
+```yaml
+refractor:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+  verbose: true
+
+passes:
+  rename:
+    preserve_main: true
+
+  string_encrypt:
+    exclude_patterns:
+      - "^https://"
+      - "^dart:"
+
+  dead_code:
+    max_insertions_per_procedure: 2
+```
+
+The `ConfigManager` parses this YAML and creates a `PassOptions` instance:
+
+```dart
+final config = ConfigManager.loadConfig(); // Reads refractor.yaml
+final options = config.toOptions();        // Converts to PassOptions
+```
+
+## Default Values
+
+When options are not specified in `refractor.yaml`, these defaults are used:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `excludeLibraryUriPatterns` | `[]` | No exclusions (obfuscate all project code) |
+| `preserveMain` | `true` | Keep `main()` function name |
+| `stringExcludePatterns` | `[]` | No exclusions (encrypt all strings) |
+| `verbose` | `false` | No detailed logging |
+
+## Usage in Passes
+
+Passes access `PassOptions` through `PassContext`:
+
+```dart
+@override
+void run(Component component, PassContext context) {
+  final options = context.options;
+
+  // Check verbose flag
+  if (options.verbose) {
+    print('[${name}] Starting obfuscation...');
+  }
+
+  for (final library in component.libraries) {
+    // shouldObfuscateLibrary() uses excludeLibraryUriPatterns
+    if (!context.shouldObfuscateLibrary(library)) continue;
+
+    // Check preserveMain when renaming procedures
+    if (options.preserveMain && procedure.name.text == 'main') {
+      continue; // Don't rename main()
+    }
+
+    // Check string exclusions before encrypting
+    if (options.stringExcludePatterns.any((re) => re.hasMatch(literal))) {
+      continue; // Don't encrypt this string
+    }
+
+    // Perform transformation...
+  }
+}
+```
+
+## Validation
+
+Invalid configurations are detected when loading `refractor.yaml`:
+
+```yaml
+passes:
+  rename:
+    preserve_main: "yes"  # ERROR: must be boolean
+```
+
+```
+Error: Invalid type for preserve_main: expected bool, got String
+```
+
+See [Configuration Guide](/configuration/refractor-yaml) for full validation rules.
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="PassContext" icon="layer-group" href="/api/pass-context">
+    Provides access to PassOptions
+  </Card>
+  <Card title="refractor.yaml" icon="file-code" href="/configuration/refractor-yaml">
+    Complete configuration reference
+  </Card>
+  <Card title="Library Exclusions" icon="filter" href="/configuration/exclusions">
+    Guide to excluding generated files
+  </Card>
+  <Card title="Pass Interface" icon="puzzle-piece" href="/api/pass">
+    Base class that receives options via context
+  </Card>
+</CardGroup>

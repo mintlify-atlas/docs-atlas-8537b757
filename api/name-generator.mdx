@@ -1,0 +1,140 @@
+---
+title: "NameGenerator"
+description: "Generates sequential obfuscated identifiers"
+---
+
+## Overview
+
+The `NameGenerator` class generates unique, sequential obfuscated identifiers in the format `_$0`, `_$1`, `_$2`, etc. It's used by the `RenamePass` to create meaningless replacement names for classes, methods, and fields.
+
+Source: `lib/src/engine/name_generator.dart:2`
+
+## Constructor
+
+```dart
+NameGenerator({String prefix = r'_$'})
+```
+
+<ParamField path="prefix" type="String" default="_$">
+  The prefix for generated names. Defaults to `_$`.
+</ParamField>
+
+## Methods
+
+### next()
+
+```dart
+String next()
+```
+
+Returns the next unique obfuscated name by incrementing an internal counter.
+
+<ResponseField name="return" type="String">
+  The next sequential name, e.g., `_$0`, `_$1`, `_$2`, etc.
+</ResponseField>
+
+**Example:**
+
+```dart
+final gen = NameGenerator();
+print(gen.next()); // _$0
+print(gen.next()); // _$1
+print(gen.next()); // _$2
+```
+
+### reset()
+
+```dart
+void reset()
+```
+
+Resets the internal counter to 0. Useful for testing or when starting a new obfuscation run.
+
+**Example:**
+
+```dart
+final gen = NameGenerator();
+gen.next(); // _$0
+gen.next(); // _$1
+gen.reset();
+gen.next(); // _$0 (counter restarted)
+```
+
+## Properties
+
+### currentCount
+
+```dart
+int get currentCount
+```
+
+Returns the current counter value without incrementing it. Useful for debugging or reporting.
+
+<ResponseField name="currentCount" type="int">
+  The current counter value (number of names generated since last reset)
+</ResponseField>
+
+**Example:**
+
+```dart
+final gen = NameGenerator();
+gen.next();
+gen.next();
+print(gen.currentCount); // 2
+```
+
+## Custom Prefixes
+
+You can customize the prefix to match your obfuscation needs:
+
+```dart
+// Generate names like o0, o1, o2...
+final gen = NameGenerator(prefix: 'o');
+
+// Generate names like a_0, a_1, a_2...
+final gen2 = NameGenerator(prefix: 'a_');
+```
+
+<Note>
+  The default prefix `_$` is chosen because:
+  - Identifiers starting with underscore are private in Dart (library-scoped)
+  - The `$` character is valid in identifiers but uncommon in user code
+  - Together they create names unlikely to collide with existing code
+</Note>
+
+## Usage with PassContext
+
+`NameGenerator` is typically accessed through `PassContext`:
+
+```dart
+class MyCustomPass extends Pass {
+  @override
+  String get name => 'my_pass';
+
+  @override
+  void run(Component component, PassContext context) {
+    final nameGen = context.nameGenerator;
+    
+    // Generate obfuscated names
+    final className = nameGen.next();
+    final methodName = nameGen.next();
+    
+    print('Class: $className');  // _$0
+    print('Method: $methodName'); // _$1
+  }
+}
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="RenamePass" icon="signature" href="/api/passes/rename-pass">
+    Uses NameGenerator to create obfuscated identifiers
+  </Card>
+  <Card title="PassContext" icon="layer-group" href="/api/pass-context">
+    Provides access to the shared NameGenerator instance
+  </Card>
+  <Card title="SymbolTable" icon="table" href="/api/symbol-table">
+    Records mappings from original to generated names
+  </Card>
+</CardGroup>
