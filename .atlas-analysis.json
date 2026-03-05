@@ -1,0 +1,108 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Refractor",
+  "projectDescription": "Dart kernel obfuscation tool that renames identifiers, encrypts strings, and injects dead code for code protection.",
+  "theme": "aspen",
+  "primaryColor": "#7C3AED",
+  "lightColor": "#A78BFA",
+  "darkColor": "#5B21B6",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Commands",
+            "pages": [
+              "commands/build",
+              "commands/init",
+              "commands/inspect"
+            ]
+          },
+          {
+            "group": "Obfuscation",
+            "pages": [
+              "obfuscation/overview",
+              "obfuscation/rename-pass",
+              "obfuscation/string-encryption",
+              "obfuscation/dead-code"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/refractor-yaml",
+              "configuration/symbol-map",
+              "configuration/exclusions"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/build-targets",
+              "guides/debugging-obfuscated-code",
+              "guides/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core",
+            "pages": [
+              "api/refractor-engine",
+              "api/pass-runner",
+              "api/symbol-table"
+            ]
+          },
+          {
+            "group": "Passes",
+            "pages": [
+              "api/passes/rename-pass",
+              "api/passes/string-encrypt-pass",
+              "api/passes/dead-code-pass"
+            ]
+          },
+          {
+            "group": "Compiler",
+            "pages": [
+              "api/compiler/compiler",
+              "api/compiler/kernel-io"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Identifier renaming with configurable preservation rules",
+    "XOR-based string encryption with runtime decoder injection",
+    "Dead code insertion to obstruct static analysis",
+    "Multiple build targets (exe, AOT, JIT, kernel)",
+    "Symbol map generation for debugging",
+    "Glob-based library exclusions"
+  ],
+  "publicApiSurface": [
+    "refractor build",
+    "refractor init",
+    "refractor inspect",
+    "RefractorEngine",
+    "PassRunner",
+    "RenamePass",
+    "StringEncryptPass",
+    "DeadCodePass",
+    "SymbolTable",
+    "Compiler",
+    "KernelIO"
+  ]
+}
